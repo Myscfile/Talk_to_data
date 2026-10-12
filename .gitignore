@@ -1,0 +1,27 @@
+# Virtual environment
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+
+# Database & data (too large for git; rebuild from the Kaggle CSVs)
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+data/
+
+# Editor / OS junk
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Tool caches
+.ruff_cache/
+.pytest_cache/

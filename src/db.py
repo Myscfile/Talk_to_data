@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from config import Config
 
+
 # config variables
 DB_PATH = Config.DB_PATH
 QUERY_TIMEOUT_S = Config.QUERY_TIMEOUT_S

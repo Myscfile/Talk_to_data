@@ -6,3 +6,4 @@ class Config:
     DB_PATH = str(BASE_DIR / "data" / "sqlite" / "database.db")
     QUERY_TIMEOUT_S = 5
     MAX_ROWS = 200
+    MODEL = "gpt-oss-120b"
