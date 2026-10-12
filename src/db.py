@@ -12,6 +12,7 @@ QUERY_TIMEOUT_S = Config.QUERY_TIMEOUT_S
 MAX_ROWS = Config.MAX_ROWS
 
 
+# Connects to database
 def connect_readonly(path: str) -> sqlite3.Connection:
     """Read-only at the SQLite level: writes fail even if the LLM tries one."""
     if not os.path.exists(path):
@@ -20,12 +21,7 @@ def connect_readonly(path: str) -> sqlite3.Connection:
     return sqlite3.connect(uri, uri=True)
 
 
-# Test
-conn = connect_readonly(DB_PATH)
-# result = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-# print(result)
-
-
+# Describes the data
 def describe_schema(conn: sqlite3.Connection) -> str:
     out = []
     tables = conn.execute(
@@ -44,38 +40,36 @@ def describe_schema(conn: sqlite3.Connection) -> str:
     return "\n\n".join(out)
 
 
-# test
-description = describe_schema(conn)
-print(description)
-
-# def is_read_only(sql: str) -> bool:
-#     s = sql.strip().lstrip("(").lower()
-#     if not (s.startswith("select") or s.startswith("with")):
-#         return False
-#     banned = (
-#         "insert ",
-#         "update ",
-#         "delete ",
-#         "drop ",
-#         "alter ",
-#         "attach ",
-#         "pragma ",
-#         "create ",
-#         "replace ",
-#         "vacuum",
-#     )
-#     return not any(b in s for b in banned) and ";" not in s.rstrip(";")
+# Safegaurd to make sure the query is valid
+def is_read_only(sql: str) -> bool:
+    s = sql.strip().lstrip("(").lower()
+    if not (s.startswith("select") or s.startswith("with")):
+        return False
+    banned = (
+        "insert ",
+        "update ",
+        "delete ",
+        "drop ",
+        "alter ",
+        "attach ",
+        "pragma ",
+        "create ",
+        "replace ",
+        "vacuum",
+    )
+    return not any(b in s for b in banned) and ";" not in s.rstrip(";")
 
 
-# def run_query(conn: sqlite3.Connection, sql: str):
-#     deadline = time.time() + QUERY_TIMEOUT_S
-#     # Abort long-running queries (returns non-zero -> interrupt).
-#     conn.set_progress_handler(lambda: int(time.time() > deadline), 10_000)
-#     try:
-#         cur = conn.execute(sql)
-#         cols = [d[0] for d in cur.description] if cur.description else []
-#         rows = cur.fetchmany(MAX_ROWS + 1)
-#         truncated = len(rows) > MAX_ROWS
-#         return cols, rows[:MAX_ROWS], truncated
-#     finally:
-#         conn.set_progress_handler(None, 0)
+# Runs the query in the database
+def run_query(conn: sqlite3.Connection, sql: str):
+    deadline = time.time() + QUERY_TIMEOUT_S
+    # Abort long-running queries (returns non-zero -> interrupt).
+    conn.set_progress_handler(lambda: int(time.time() > deadline), 10_000)
+    try:
+        cur = conn.execute(sql)
+        cols = [d[0] for d in cur.description] if cur.description else []
+        rows = cur.fetchmany(MAX_ROWS + 1)
+        truncated = len(rows) > MAX_ROWS
+        return cols, rows[:MAX_ROWS], truncated
+    finally:
+        conn.set_progress_handler(None, 0)

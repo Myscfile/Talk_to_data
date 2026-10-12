@@ -11,21 +11,32 @@ from dotenv import load_dotenv
 load_dotenv()
 client = Cerebras(api_key=os.environ["CEREBRAS_API_KEY"])
 
-# Hand-written knowledge about the data. This is the biggest quality lever:
-# make sure table/column names match YOUR database.
 NOTES = """
-- Data covers roughly Sept 2016 to Oct 2018. If the user says "last month",
-  "this year" etc., say there is no data for the current date and offer the
-  most recent period in the data instead.
+- Data covers Sept 2016 to Oct 2018 (order_purchase_timestamp). If the user
+  says "last month", "this year", "recently" etc., there is no data for the
+  real current date: say so in "message" and use the most recent period in
+  the data instead.
 - Timestamps are TEXT ('YYYY-MM-DD HH:MM:SS'). Use SQLite date functions:
-  date(), strftime('%Y-%m', col), julianday(a) - julianday(b).
-- customer_id is unique PER ORDER. To count real people / repeat buyers use
-  customer_unique_id from the customers table.
-- An order can have more than one review: aggregate reviews per order
-  (e.g. AVG(review_score)) before joining, to avoid double-counting.
-- order_status values: delivered, shipped, canceled, unavailable, invoiced,
-  processing, created, approved.
-- Late delivery = order_delivered_customer_date > order_estimated_delivery_date.
+  date(), strftime('%Y-%m', col), julianday(a) - julianday(b) for days between.
+- CUSTOMERS: customer_id is a NEW id for EVERY order, so grouping by it always
+  gives 1 order per customer. For anything per customer (top customers, orders
+  per customer, repeat buyers, number of customers) JOIN customers and use
+  customers.customer_unique_id. Example:
+    SELECT c.customer_unique_id, COUNT(*) AS n_orders
+    FROM orders o JOIN customers c ON c.customer_id = o.customer_id
+    GROUP BY c.customer_unique_id ORDER BY n_orders DESC LIMIT 10;
+- ORDER STATUS: 'delivered' = completed (~97% of orders). 'shipped' = still in
+  transit (rare). Others: canceled, unavailable, invoiced, processing,
+  created, approved. For "sold"/"completed" orders use 'delivered' and say so.
+- REVIEWS: an order can have more than one review. Aggregate per order first
+  (e.g. AVG(review_score) GROUP BY order_id) before joining to orders, or
+  orders get double-counted. review_score is 1-5.
+- DELIVERY: delivery dates are NULL for orders that never arrived; filter
+  them out for delivery-time questions. Late = order_delivered_customer_date >
+  order_estimated_delivery_date. Delivery time in days =
+  julianday(order_delivered_customer_date) - julianday(order_purchase_timestamp).
+- NOT IN THIS DATABASE: prices, revenue, payments, products, categories,
+  sellers, customer age/gender. Questions needing these -> "cannot_answer".
 """
 
 SYSTEM = """You answer questions about an e-commerce SQLite database by writing SQL.
@@ -33,7 +44,7 @@ SYSTEM = """You answer questions about an e-commerce SQLite database by writing 
 Schema (with sample rows):
 {schema}
 
-Domain notes:
+Domain notes (follow these strictly, they override your assumptions):
 {notes}
 
 Reply with ONLY a JSON object, no other text:
@@ -41,8 +52,10 @@ Reply with ONLY a JSON object, no other text:
 
 - action="sql": the question is answerable. Write ONE read-only SQLite query
   (SELECT or WITH only). Use only tables/columns that exist above. Add a LIMIT
-  unless the result is an aggregate. Put any assumption in "message"
-  (e.g. "Interpreted 'best customers' as highest total spend").
+  unless the result is an aggregate. Put every assumption in "message"
+  (e.g. "Interpreted 'best customers' as most orders").
+- For any per-customer question, GROUP BY customers.customer_unique_id,
+  NEVER by customer_id.
 - action="clarify": too ambiguous to guess. Ask one short question in "message".
 - action="cannot_answer": the data can't answer it (missing columns, off-topic,
   a request to change data, gibberish). Explain briefly in "message".
@@ -102,13 +115,3 @@ def explain(
         temperature=0,
     )
     return resp.choices[0].message.content.strip()
-
-
-DB_PATH = Config.DB_PATH
-conn = connect_readonly(DB_PATH)
-schema = describe_schema(conn)
-system = build_system_prompt(schema)
-_, decision = ask_for_sql(
-    system, [{"role": "user", "content": "How many orders are there?"}]
-)
-print(decision)

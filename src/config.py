@@ -7,3 +7,4 @@ class Config:
     QUERY_TIMEOUT_S = 5
     MAX_ROWS = 200
     MODEL = "gpt-oss-120b"
+    MAX_FIX_ATTEMPTS = 2
