@@ -1,16 +1,30 @@
+"""LLM layer: builds the prompt, asks the model for SQL, and explains results.
+
+Contains no database code; app.py connects this to db.py.
+"""
+
 import json
 import os
 
 from cerebras.cloud.sdk import Cerebras
-
-from config import Config
-from db import connect_readonly, describe_schema
 from dotenv import load_dotenv
 
+from config import Config
 
-load_dotenv()
+load_dotenv(Config.BASE_DIR / ".env")
+
+if "CEREBRAS_API_KEY" not in os.environ:
+    raise RuntimeError(
+        "CEREBRAS_API_KEY is not set. Add it to a .env file in the project folder."
+    )
+
 client = Cerebras(api_key=os.environ["CEREBRAS_API_KEY"])
 
+VALID_ACTIONS = {"sql", "clarify", "cannot_answer"}
+PREVIEW_ROWS = 50  # rows sent to the explainer; more costs tokens without adding much
+
+# Domain knowledge the model can't infer from the schema alone.
+# Every rule here exists because the model got it wrong without it.
 NOTES = """
 - Data covers Sept 2016 to Oct 2018 (order_purchase_timestamp). If the user
   says "last month", "this year", "recently" etc., there is no data for the
@@ -39,6 +53,7 @@ NOTES = """
   sellers, customer age/gender. Questions needing these -> "cannot_answer".
 """
 
+# Double braces {{ }} are literal braces; single braces are filled by .format().
 SYSTEM = """You answer questions about an e-commerce SQLite database by writing SQL.
 
 Schema (with sample rows):
@@ -63,11 +78,17 @@ Reply with ONLY a JSON object, no other text:
 
 
 def build_system_prompt(schema: str) -> str:
+    """Combine the schema description and domain notes into the system prompt."""
     return SYSTEM.format(schema=schema, notes=NOTES)
 
 
 def parse_json(text: str) -> dict:
-    """Models sometimes wrap JSON in ```json fences or add text; dig it out."""
+    """Parse the model's reply as JSON, tolerating extra text around it.
+
+    Models sometimes wrap the JSON in ```json fences or add a sentence before
+    it, so if a direct parse fails we take everything from the first '{' to
+    the last '}'.
+    """
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -77,41 +98,78 @@ def parse_json(text: str) -> dict:
         raise
 
 
-def ask_for_sql(system: str, messages: list):
-    """Returns (raw_text, decision_dict). raw_text is needed for the retry loop."""
+def ask_for_sql(system: str, messages: list[dict]) -> tuple[str, dict]:
+    """Ask the model to decide how to handle the question.
+
+    Returns (raw_text, decision). decision always has a valid "action";
+    malformed replies are turned into "cannot_answer" so the caller never has
+    to handle broken output. raw_text is kept so the retry loop in app.py can
+    show the model its own previous answer.
+    """
     resp = client.chat.completions.create(
         model=Config.MODEL,
         messages=[{"role": "system", "content": system}] + messages,
         response_format={"type": "json_object"},
-        temperature=0,
+        temperature=0,  # same question -> same SQL, which makes testing reproducible
     )
-    raw = resp.choices[0].message.content
+    raw = resp.choices[0].message.content or ""
+
     try:
         decision = parse_json(raw)
     except json.JSONDecodeError:
-        decision = {
+        return raw, {
             "action": "cannot_answer",
             "message": "Model returned invalid JSON.",
+        }
+
+    if decision.get("action") not in VALID_ACTIONS:
+        return raw, {
+            "action": "cannot_answer",
+            "message": "Model returned an unknown action.",
         }
     return raw, decision
 
 
 def explain(
-    question: str, sql: str, assumption: str, cols, rows, truncated: bool
+    question: str,
+    sql: str,
+    assumption: str,
+    cols: list[str],
+    rows: list[tuple],
+    truncated: bool,
 ) -> str:
-    preview = [dict(zip(cols, r)) for r in rows[:50]]
+    """Turn the query result into a short plain-language answer.
+
+    The model only sees the actual result rows, and is told not to invent
+    numbers, so the answer stays grounded in what the database returned.
+    """
+    preview = [dict(zip(cols, r)) for r in rows[:PREVIEW_ROWS]]
     prompt = (
         f"Question: {question}\n\nSQL used:\n{sql}\n\n"
         f"Assumptions: {assumption or 'none'}\n\n"
-        f"Result ({len(rows)}{'+' if truncated else ''} rows, first 50 shown):\n"
+        f"Result ({len(rows)}{'+' if truncated else ''} rows, "
+        f"first {PREVIEW_ROWS} shown):\n"
         f"{json.dumps(preview, default=str, ensure_ascii=False)}\n\n"
         "Answer the question in 2-4 plain sentences using these results. "
         "Mention any assumption. If the result is empty, say so and suggest why "
-        "(e.g. date outside the data range). Do not invent numbers."
+        "(e.g. date outside the data range). Do not invent numbers. "
+        "If the result looks suspicious (e.g. all values tied, all counts 1, "
+        "or suspiciously few rows), say so plainly instead of presenting it as a finding."
     )
     resp = client.chat.completions.create(
         model=Config.MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
     )
-    return resp.choices[0].message.content.strip()
+    return (resp.choices[0].message.content or "").strip()
+
+
+if __name__ == "__main__":
+    from db import connect_readonly, describe_schema
+
+    conn = connect_readonly(Config.DB_PATH)
+    system = build_system_prompt(describe_schema(conn))
+    _, decision = ask_for_sql(
+        system, [{"role": "user", "content": "How many orders are there?"}]
+    )
+    print(decision)
