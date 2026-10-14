@@ -44,9 +44,14 @@ NOTES = """
   created, approved. For "sold"/"completed" orders use 'delivered' and say so.
 - REVIEWS: an order can have more than one review. Aggregate per order first
   (e.g. AVG(review_score) GROUP BY order_id) before joining to orders, or
-  orders get double-counted. review_score is 1-5.
+  orders get double-counted. review_score is 1-5. About 1% of orders have no
+  review at all: use LEFT JOIN when the question is about all orders, and a
+  plain JOIN only when it is about reviewed orders.
 - DELIVERY: delivery dates are NULL for orders that never arrived; filter
-  them out for delivery-time questions. Late = order_delivered_customer_date >
+  them out for delivery-time questions with
+  order_delivered_customer_date IS NOT NULL. Do not use
+  order_status = 'delivered' as a stand-in: a few delivered orders have no
+  delivery date and a few non-delivered ones have one. Late = order_delivered_customer_date >
   order_estimated_delivery_date. Delivery time in days =
   julianday(order_delivered_customer_date) - julianday(order_purchase_timestamp).
 - NOT IN THIS DATABASE: prices, revenue, payments, products, categories,

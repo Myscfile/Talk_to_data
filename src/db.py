@@ -1,5 +1,6 @@
 """Database access: read-only connection, schema description, and safe query execution."""
 
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -58,6 +59,50 @@ def is_read_only(sql: str) -> bool:
     if any(keyword in s for keyword in Config.BANNED_KEYWORDS):
         return False
     return ";" not in s.rstrip(";")  # a trailing ';' is fine, one in the middle is not
+
+
+def check_pitfalls(sql: str) -> str:
+    """Return a fix-it message if the query hits a known data pitfall, else "".
+
+    Unlike is_read_only(), this is not about safety: the query is valid but
+    would give a misleading answer. The message goes back to the LLM so it can
+    rewrite the query. Regex-based, so it is a heuristic and can miss cases.
+    """
+    # Lower-case, collapse whitespace and drop string literals so that text
+    # inside quotes can't trigger a match.
+    s = re.sub(r"'[^']*'", "''", sql.lower())
+    s = re.sub(r"\s+", " ", s)
+
+    # 1. customer_id is a new id for every order, so grouping or counting
+    #    distinct values of it gives one order per "customer".
+    group_clauses = re.findall(
+        r"group by (.*?)(?= having | order by | limit |\)|$)", s
+    )
+    if any(re.search(r"\bcustomer_id\b", clause) for clause in group_clauses) or (
+        re.search(r"count\s*\(\s*distinct\s+(?:\w+\.)?customer_id\s*\)", s)
+    ):
+        return (
+            "customer_id is a new id for every order, so grouping or counting "
+            "by it treats each order as a different customer. JOIN customers "
+            "and use customers.customer_unique_id instead."
+        )
+
+    # 2. An order can have several reviews, so joining order_reviews straight
+    #    onto orders duplicates orders. A GROUP BY on order_id anywhere in the
+    #    query is taken as "reviews were aggregated per order first".
+    joins_reviews = re.search(r"\bjoin order_reviews\b", s) or (
+        re.search(r"\bfrom order_reviews\b", s) and re.search(r"\bjoin orders\b", s)
+    )
+    if joins_reviews and not any(
+        re.search(r"\border_id\b", clause) for clause in group_clauses
+    ):
+        return (
+            "An order can have more than one review, so joining order_reviews "
+            "directly duplicates orders. Aggregate reviews per order first "
+            "(e.g. a subquery with GROUP BY order_id) and join that."
+        )
+
+    return ""
 
 
 def run_query(
