@@ -14,7 +14,8 @@ class Config:
     # which folder the app is started from. parent.parent = project root.
     BASE_DIR = Path(__file__).resolve().parent.parent
     DB_PATH = str(BASE_DIR / "data" / "sqlite" / "database.db")
-    LOG_DIR = BASE_DIR / "logs"
+    LOG_DIR = BASE_DIR / "logs"  # plain-text diagnostics, for debugging
+    JSON_LOG_DIR = BASE_DIR / "json_log"  # one JSON record per question
 
     # Query safety limits
     QUERY_TIMEOUT_S = 5  # abort queries running longer than this (seconds)

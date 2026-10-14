@@ -9,6 +9,10 @@ __pycache__/
 # Secrets
 .env
 
+# Run logs
+logs/
+json_log/
+
 # Database & data (too large for git; rebuild from the Kaggle CSVs)
 *.db
 *.db-journal

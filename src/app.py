@@ -10,6 +10,8 @@ Flow per question:
 
 import logging
 import sqlite3
+import time
+import uuid
 from dataclasses import dataclass, field
 
 from config import Config
@@ -21,8 +23,8 @@ from db import (
     run_query,
 )
 from llm import ask_for_sql, build_system_prompt, explain
+from logger import log_interaction, setup_logging
 
-logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
 
@@ -45,8 +47,13 @@ def _send_back(messages: list[dict], raw: str, feedback: str) -> None:
     )
 
 
-def answer(conn: sqlite3.Connection, system: str, question: str) -> Result:
-    """Answer one question, letting the model fix its own SQL if needed."""
+def answer(
+    conn: sqlite3.Connection, system: str, question: str, question_id: str = ""
+) -> Result:
+    """Answer one question, letting the model fix its own SQL if needed.
+
+    question_id only tags the diagnostic log lines for this question.
+    """
     messages = [{"role": "user", "content": question}]
     sql = ""
 
@@ -55,26 +62,36 @@ def answer(conn: sqlite3.Connection, system: str, question: str) -> Result:
         action = decision["action"]
         msg = decision.get("message", "")
         sql = decision.get("sql", "")
+        log.info(
+            "[%s] attempt %d: action=%s sql=%s",
+            question_id, attempt + 1, action, sql,
+        )
 
         if action != "sql":
             return Result(status=action, message=msg)
 
         # Hard refusal: never retry a write attempt, just stop.
         if not is_read_only(sql):
+            log.warning("[%s] refused non-read-only query: %s", question_id, sql)
             return Result(
                 "cannot_answer", "Refused: only read-only queries are allowed.", sql
             )
 
         problem = check_pitfalls(sql)
         if problem:
-            log.info("Guard rejected query (attempt %d): %s", attempt + 1, problem)
+            log.info(
+                "[%s] guard rejected (attempt %d): %s",
+                question_id, attempt + 1, problem,
+            )
             _send_back(messages, raw, problem)
             continue
 
         try:
             cols, rows, truncated = run_query(conn, sql)
         except sqlite3.Error as e:
-            log.info("Query failed (attempt %d): %s", attempt + 1, e)
+            log.info(
+                "[%s] query failed (attempt %d): %s", question_id, attempt + 1, e
+            )
             _send_back(messages, raw, f"That query failed: {e}.")
             continue
 
@@ -106,6 +123,8 @@ def print_result(result: Result, max_rows: int = 10) -> None:
 
 
 def main() -> None:
+    setup_logging()
+    log.info("start: db=%s model=%s", Config.DB_PATH, Config.MODEL)
     try:
         conn = connect_readonly(Config.DB_PATH)
     except FileNotFoundError as e:
@@ -123,12 +142,26 @@ def main() -> None:
             break
         if not question:
             continue
+        question_id = uuid.uuid4().hex[:8]
+        log.info("[%s] question: %s", question_id, question)
+        started = time.perf_counter()
         try:
-            print_result(answer(conn, system, question))
+            result = answer(conn, system, question, question_id)
+            print_result(result)
         except Exception:
             # Top-level safety net (network down, API error, ...): keep the app
             # running and show the error instead of crashing the whole session.
-            log.exception("Something went wrong answering that question")
+            log.exception("[%s] Something went wrong answering that question", question_id)
+            result = Result("error", "")
+        log_interaction(
+            question_id=question_id,
+            question=question,
+            status=result.status,
+            answer=result.message,
+            sql=result.sql,
+            row_count=len(result.rows),
+            seconds=round(time.perf_counter() - started, 2),
+        )
 
     conn.close()
 
