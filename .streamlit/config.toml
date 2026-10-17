@@ -1,0 +1,6 @@
+[server]
+# Listen on this machine only. Streamlit's default is all network interfaces.
+address = "127.0.0.1"
+
+[browser]
+gatherUsageStats = false

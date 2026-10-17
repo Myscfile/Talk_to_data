@@ -1,0 +1,204 @@
+"""Dashboard: a chat box that opens with a short intro to the data.
+
+The chat is not connected to the LLM pipeline yet: get_answer() is the one
+placeholder to replace. Run from the project folder with:
+
+    streamlit run src/dashboard.py
+"""
+
+import altair as alt
+import pandas as pd
+import streamlit as st
+
+from config import Config
+from db import connect_readonly
+
+st.set_page_config(page_title="Olist data chat", layout="wide")
+
+ROBOT = Config.BASE_DIR / "assets" / "robot.svg"  # the assistant's avatar
+
+
+@st.cache_data
+def load_stats() -> dict:
+    """Read a few summary numbers from the database (read-only), once."""
+    conn = connect_readonly(Config.DB_PATH)
+    try:
+        one = lambda sql: conn.execute(sql).fetchone()[0]
+        first, last = conn.execute(
+            "SELECT MIN(order_purchase_timestamp), MAX(order_purchase_timestamp) FROM orders"
+        ).fetchone()
+        return {
+            "orders": one("SELECT COUNT(*) FROM orders"),
+            "customers": one(
+                "SELECT COUNT(DISTINCT customer_unique_id) FROM customers"
+            ),
+            "reviews": one("SELECT COUNT(*) FROM order_reviews"),
+            "first": first[:10],
+            "last": last[:10],
+            "status": pd.read_sql_query(
+                "SELECT order_status, COUNT(*) AS orders FROM orders "
+                "GROUP BY order_status ORDER BY orders DESC",
+                conn,
+            ).set_index("order_status"),
+            "monthly": pd.read_sql_query(
+                "SELECT strftime('%Y-%m', order_purchase_timestamp) AS month, "
+                "COUNT(*) AS orders FROM orders GROUP BY month ORDER BY month",
+                conn,
+            ).set_index("month"),
+        }
+    finally:
+        conn.close()
+
+
+def get_answer(question: str) -> str:
+    """Placeholder: replace with a call into the LLM pipeline (app.answer)."""
+    return "Not connected to the model yet."
+
+
+def monthly_chart(monthly: pd.DataFrame) -> alt.Chart:
+    """Orders per month. Not .interactive(): the mouse wheel must scroll the page."""
+    data = monthly.reset_index()
+    data["month"] = pd.to_datetime(data["month"])
+    return (
+        alt.Chart(data)
+        .mark_line(point=True)
+        .encode(
+            x=alt.X("month:T", title=None, axis=alt.Axis(format="%b %Y")),
+            y=alt.Y("orders:Q", title=None),
+            tooltip=[alt.Tooltip("month:T", format="%B %Y"), "orders:Q"],
+        )
+        .properties(height=220)
+    )
+
+
+def status_chart(status: pd.DataFrame) -> alt.Chart:
+    """Horizontal bars, largest first. Fixed, so the page scrolls over it."""
+    return (
+        alt.Chart(status.reset_index())
+        .mark_bar()
+        .encode(
+            x=alt.X("orders:Q", title=None),
+            y=alt.Y("order_status:N", sort="-x", title=None),
+            tooltip=["order_status:N", "orders:Q"],
+        )
+        .properties(height=220)
+    )
+
+
+def welcome_message(stats: dict) -> str:
+    """The first chat message: what the data is and how to ask about it."""
+    return f"""**Hi! Ask me anything about this data.**
+
+It is e-commerce order data from Olist (Brazil): **{stats['orders']:,} orders** \
+from **{stats['customers']:,} customers**, placed between {stats['first']} and \
+{stats['last']}, with {stats['reviews']:,} reviews.
+
+**What's in the data**
+- `orders`: status, and purchase, approval, delivery and estimated delivery dates
+- `customers`: city and state
+- `order_reviews`: score (1-5) and comments
+
+**Not in the data:** prices, revenue, payments, products, sellers, customer age or gender. \
+I can't answer questions about those.
+
+**How to ask**
+- Use plain English and ask one question at a time.
+- Say what you mean by vague words. "Best customers" could mean most orders, and \
+"late" could mean after the estimated delivery date.
+- The data ends in {stats['last'][:7]}, so "last month" means the latest month in the data.
+- Per-person questions count each customer once (`customer_unique_id`), because \
+`customer_id` changes with every order.
+
+**Try one of these**
+- How many orders were placed in each year?
+- What is the average delivery time in days?
+- Who are the top 10 customers by number of orders?
+- Which state has the most customers?
+"""
+
+
+def avatar(role: str) -> str | None:
+    """The robot image for the assistant; users keep Streamlit's default."""
+    return str(ROBOT) if role == "assistant" and ROBOT.exists() else None
+
+
+def pin_overview_css() -> str:
+    """CSS that keeps the overview bar in view while the chat scrolls underneath.
+
+    The bar needs a solid background or the chat would show through it.
+    Opened, it scrolls inside itself so it never covers more than 60% of the screen.
+    """
+    # The wrapper Streamlit puts around the keyed container is what has to stick:
+    # it sits directly inside the tall page column, so it has room to move.
+    # light-dark() follows Streamlit's live color-scheme, so the background changes
+    # the moment the theme is switched (Python only runs on a page reload).
+    return """<style>
+[data-testid="stLayoutWrapper"]:has(> .st-key-overview) {
+    position: sticky; top: 3.75rem; z-index: 99;
+    background: light-dark(#ffffff, #0e1117); padding-bottom: 0.25rem;
+}
+.st-key-overview [data-testid="stExpanderDetails"] {
+    max-height: 60vh; overflow-y: auto;
+}
+</style>"""
+
+
+def show_overview(stats: dict) -> None:
+    """Key numbers and two charts, collapsed and pinned so it is always at hand."""
+    st.markdown(pin_overview_css(), unsafe_allow_html=True)
+    status = stats["status"]["orders"]
+    delivered = status.get("delivered", 0)
+    total = status.sum()
+
+    with st.container(key="overview"), st.expander("Data overview"):
+        st.caption(f"Olist e-commerce orders, {stats['first']} to {stats['last']}")
+        cols = st.columns(4)
+        cols[0].metric("Orders", f"{stats['orders']:,}")
+        cols[1].metric("Unique customers", f"{stats['customers']:,}")
+        cols[2].metric("Reviews", f"{stats['reviews']:,}")
+        cols[3].metric("Delivered", f"{delivered / total:.1%}")
+
+        left, right = st.columns([2, 1])
+        left.caption("Orders per month")
+        left.altair_chart(monthly_chart(stats["monthly"]), width="stretch")
+        # Delivered is ~97% of orders and would flatten every other bar, so it
+        # is shown as the metric above and left out of the chart.
+        right.caption("Orders not delivered, by status")
+        right.altair_chart(
+            status_chart(stats["status"].drop(index="delivered", errors="ignore")),
+            width="stretch",
+        )
+
+
+def show_chat(stats: dict) -> None:
+    """Chat history plus the input box; each new question gets one reply."""
+    if "messages" not in st.session_state:
+        st.session_state.messages = [
+            {"role": "assistant", "content": welcome_message(stats)}
+        ]
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"], avatar=avatar(message["role"])):
+            st.markdown(message["content"])
+
+    question = st.chat_input("Ask a question about the data...")
+    if not question:
+        return
+    reply = get_answer(question)
+    st.session_state.messages += [
+        {"role": "user", "content": question},
+        {"role": "assistant", "content": reply},
+    ]
+    with st.chat_message("user"):
+        st.markdown(question)
+    with st.chat_message("assistant", avatar=avatar("assistant")):
+        st.markdown(reply)
+
+
+st.title("Chat with your data")
+try:
+    stats = load_stats()
+except FileNotFoundError as e:
+    st.error(str(e))
+    st.stop()
+show_overview(stats)
+show_chat(stats)
