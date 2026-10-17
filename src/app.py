@@ -25,6 +25,7 @@ from db import (
 )
 from llm import ask_for_sql, build_system_prompt, explain, prompt_hash
 from logger import log_interaction, setup_logging
+from suggestions import clean_questions, split_followups
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +40,12 @@ class Result:
     columns: list[str] = field(default_factory=list)
     rows: list[tuple] = field(default_factory=list)
     assumption: str = ""  # how the model read the question, shown separately
+    suggestions: list[str] = field(default_factory=list)  # questions to try next
+
+
+def _examples() -> list[str]:
+    """Questions known to work, offered when the model has nothing better."""
+    return list(Config.EXAMPLE_QUESTIONS[:3])
 
 
 def _send_back(messages: list[dict], raw: str, feedback: str) -> None:
@@ -70,13 +77,19 @@ def answer(
         )
 
         if action != "sql":
-            return Result(status=action, message=msg)
+            suggestions = clean_questions(decision.get("suggestions"))
+            if not suggestions and action == "cannot_answer":
+                suggestions = _examples()
+            return Result(status=action, message=msg, suggestions=suggestions)
 
         # Hard refusal: never retry a write attempt, just stop.
         if not is_read_only(sql):
             log.warning("[%s] refused non-read-only query: %s", question_id, sql)
             return Result(
-                "cannot_answer", "Refused: only read-only queries are allowed.", sql
+                "cannot_answer",
+                "Refused: only read-only queries are allowed.",
+                sql,
+                suggestions=_examples(),
             )
 
         problem = check_pitfalls(sql)
@@ -97,10 +110,19 @@ def answer(
             _send_back(messages, raw, f"That query failed: {e}.")
             continue
 
-        explanation = explain(question, sql, msg, cols, rows, truncated)
-        return Result("ok", explanation, sql, cols, rows, assumption=msg)
+        explanation, follow_ups = split_followups(
+            explain(question, sql, msg, cols, rows, truncated)
+        )
+        return Result(
+            "ok", explanation, sql, cols, rows, assumption=msg, suggestions=follow_ups
+        )
 
-    return Result("error", "Couldn't produce a working query. Try rephrasing.", sql)
+    return Result(
+        "error",
+        "Couldn't produce a working query. Try rephrasing, or pick one of these.",
+        sql,
+        suggestions=_examples(),
+    )
 
 
 LABELS = {
@@ -124,6 +146,11 @@ def print_result(result: Result, max_rows: int = 10) -> None:
     if result.assumption:
         print(f"\nHow I read your question: {result.assumption}")
     print(f"\n{LABELS.get(result.status, 'Result')}: {result.message}\n")
+    if result.suggestions:
+        print("You could ask:")
+        for question in result.suggestions:
+            print(f"  - {question}")
+        print()
 
 
 def warn_if_not_validated() -> None:

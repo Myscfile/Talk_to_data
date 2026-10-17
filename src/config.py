@@ -25,6 +25,14 @@ class Config:
     MODEL = "gpt-oss-120b"  # Cerebras model name
     MAX_FIX_ATTEMPTS = 2  # times the model may retry after a failed/rejected query
 
+    # Questions known to work: shown as buttons, and offered when a question fails
+    EXAMPLE_QUESTIONS = (
+        "How many orders were placed in each year?",
+        "What is the average delivery time in days?",
+        "Who are the top 10 customers by number of orders?",
+        "Which state has the most customers?",
+    )
+
     # Evaluation (eval/run_eval.py)
     EVAL_DIR = BASE_DIR / "eval"
     VALIDATED_PATH = EVAL_DIR / "validated_model.json"  # written when a run passes

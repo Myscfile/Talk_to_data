@@ -72,8 +72,8 @@ def load_pipeline():
     return app, system
 
 
-def get_answer(question: str) -> tuple[str, str, str]:
-    """Run one question through the pipeline: (answer text, SQL used, assumption)."""
+def get_answer(question: str) -> tuple[str, str, str, list[str]]:
+    """Run one question: (answer text, SQL used, assumption, suggested questions)."""
     try:
         app, system = load_pipeline()
         # A new read-only connection per question: SQLite connections can't be
@@ -84,11 +84,11 @@ def get_answer(question: str) -> tuple[str, str, str]:
         finally:
             conn.close()
     except RuntimeError as e:  # llm.py: the API key is not set
-        return f"The model isn't available: {e}", "", ""
+        return f"The model isn't available: {e}", "", "", []
     except Exception:
         log.exception("Failed to answer: %s", question)
-        return "Something went wrong answering that. Please try again.", "", ""
-    return result.message, result.sql, result.assumption
+        return "Something went wrong answering that. Please try again.", "", "", []
+    return result.message, result.sql, result.assumption, result.suggestions
 
 
 def monthly_chart(monthly: pd.DataFrame) -> alt.Chart:
@@ -144,12 +144,6 @@ I can't answer questions about those.
 - The data ends in {stats["last"][:7]}, so "last month" means the latest month in the data.
 - Per-person questions count each customer once (`customer_unique_id`), because \
 `customer_id` changes with every order.
-
-**Try one of these**
-- How many orders were placed in each year?
-- What is the average delivery time in days?
-- Who are the top 10 customers by number of orders?
-- Which state has the most customers?
 """
 
 
@@ -162,14 +156,36 @@ def avatar(role: str) -> str | None:
     return str(image) if image.exists() else None
 
 
-def show_body(content: str, sql: str = "", assumption: str = "") -> None:
-    """A message's text, how the question was read, and the SQL (closed at first)."""
+def ask_this(question: str) -> None:
+    """Button callback: queue the question; show_chat picks it up on the rerun."""
+    st.session_state.pending = question
+
+
+def show_body(
+    content: str,
+    sql: str = "",
+    assumption: str = "",
+    suggestions: tuple | list = (),
+    key: str = "",
+) -> None:
+    """A message's text, how the question was read, the SQL (closed at first)
+    and suggested questions as buttons. key keeps the buttons' ids unique."""
     st.markdown(content)
     if assumption:
         st.caption(f"How I read your question: {assumption}")
     if sql:
         with st.expander("SQL used"):
             st.code(sql, language="sql")
+    if suggestions:
+        st.caption("You could ask:")
+        for i, suggestion in enumerate(suggestions):
+            st.button(
+                suggestion,
+                key=f"{key}-{i}",
+                on_click=ask_this,
+                args=(suggestion,),
+                width="stretch",
+            )
 
 
 def pin_overview_css() -> str:
@@ -224,15 +240,31 @@ def show_chat(stats: dict) -> None:
     """Chat history plus the input box; each new question gets one reply."""
     if "messages" not in st.session_state:
         st.session_state.messages = [
-            {"role": "assistant", "content": welcome_message(stats)}
+            {
+                "role": "assistant",
+                "content": welcome_message(stats),
+                "suggestions": list(Config.EXAMPLE_QUESTIONS),
+            }
         ]
-    for message in st.session_state.messages:
+    messages = st.session_state.messages
+
+    # A clicked suggestion is queued in session state and handled like typed input.
+    typed = st.chat_input("Ask a question about the data...")
+    question = st.session_state.pop("pending", None) or typed
+
+    for i, message in enumerate(messages):
+        # Suggestion buttons only under the newest message, and not while a new
+        # question is being answered (they would be stale).
+        show_buttons = i == len(messages) - 1 and not question
         with st.chat_message(message["role"], avatar=avatar(message["role"])):
             show_body(
-                message["content"], message.get("sql", ""), message.get("assumption", "")
+                message["content"],
+                message.get("sql", ""),
+                message.get("assumption", ""),
+                message.get("suggestions", ()) if show_buttons else (),
+                key=f"s{i}",
             )
 
-    question = st.chat_input("Ask a question about the data...")
     if not question:
         return
     # Show the question straight away, then the reply once it is ready.
@@ -240,11 +272,19 @@ def show_chat(stats: dict) -> None:
         st.markdown(question)
     with st.chat_message("assistant", avatar=avatar("assistant")):
         with st.spinner("Thinking..."):
-            reply, sql, assumption = get_answer(question)
-        show_body(reply, sql, assumption)
-    st.session_state.messages += [
+            reply, sql, assumption, suggestions = get_answer(question)
+        # The reply will sit at index len(messages) + 1, so its button ids match
+        # the ones the history loop uses on the next run.
+        show_body(reply, sql, assumption, suggestions, key=f"s{len(messages) + 1}")
+    messages += [
         {"role": "user", "content": question},
-        {"role": "assistant", "content": reply, "sql": sql, "assumption": assumption},
+        {
+            "role": "assistant",
+            "content": reply,
+            "sql": sql,
+            "assumption": assumption,
+            "suggestions": suggestions,
+        },
     ]
 
 

@@ -69,7 +69,7 @@ Domain notes (follow these strictly, they override your assumptions):
 {notes}
 
 Reply with ONLY a JSON object, no other text:
-{{"action": "sql" | "clarify" | "cannot_answer", "sql": "...", "message": "..."}}
+{{"action": "sql" | "clarify" | "cannot_answer", "sql": "...", "message": "...", "suggestions": []}}
 
 - action="sql": the question is answerable. Write ONE read-only SQLite query
   (SELECT or WITH only). Use only tables/columns that exist above. Add a LIMIT
@@ -82,8 +82,14 @@ Reply with ONLY a JSON object, no other text:
   return the size of the whole group it comes from; when averaging, also
   return COUNT(*) of the rows averaged.
 - action="clarify": too ambiguous to guess. Ask one short question in "message".
+  In "suggestions" give 2-3 complete questions that settle the ambiguity
+  (for "best customers": one by number of orders, one by review score).
 - action="cannot_answer": the data can't answer it (missing columns, off-topic,
-  a request to change data, gibberish). Explain briefly in "message".
+  a request to change data, gibberish). In "message" explain why, saying which
+  data is missing. In "suggestions" give 2-3 complete questions that this data
+  CAN answer and that are close to what the user wanted.
+- Every suggestion must be answerable with the tables above and must make sense
+  on its own (never "and for 2018?"). For action="sql" leave "suggestions" empty.
 """
 
 
@@ -187,7 +193,12 @@ def explain(
         "If the result is empty, say so and suggest why (e.g. date outside the "
         "data range). If the result looks suspicious (e.g. all values tied, all "
         "counts 1, or suspiciously few rows), say so plainly instead of "
-        "presenting it as a finding."
+        "presenting it as a finding.\n\n"
+        "Finish with a line 'FOLLOW-UPS:' and then up to 3 lines starting with "
+        "'- ', each a complete question that makes sense on its own, goes a "
+        "step deeper than this answer, and can be answered from the orders, "
+        "customers and order_reviews tables (never prices, revenue, products or "
+        "sellers). Write nothing after them."
     )
     resp = client.chat.completions.create(
         model=Config.MODEL,
