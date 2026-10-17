@@ -12,6 +12,7 @@ __pycache__/
 # Run logs
 logs/
 json_log/
+eval/results/
 
 # Database & data (too large for git; rebuild from the Kaggle CSVs)
 *.db

@@ -1,0 +1,10 @@
+{
+  "model": "gpt-oss-120b",
+  "validated_at": "2026-10-17T12:44:03",
+  "passed": 10,
+  "total": 10,
+  "pass_rate": 1.0,
+  "failed_ids": [],
+  "prompt_hash": "96eac5a22cf5",
+  "eval_set_hash": "c5710ad92ebf"
+}

@@ -25,6 +25,13 @@ class Config:
     MODEL = "gpt-oss-120b"  # Cerebras model name
     MAX_FIX_ATTEMPTS = 2  # times the model may retry after a failed/rejected query
 
+    # Evaluation (eval/run_eval.py)
+    EVAL_DIR = BASE_DIR / "eval"
+    VALIDATED_PATH = EVAL_DIR / "validated_model.json"  # written when a run passes
+    EVAL_MAX_QUESTIONS = 10  # keeps a run quick and cheap
+    EVAL_PASS_RATE = 0.9  # share of questions that must pass to validate a model
+    EVAL_TOLERANCE = 0.005  # decimals may differ by 0.5%; whole numbers must match
+
     # Words that make a query non-read-only. A first check only: the
     # read-only database connection is the real protection.
     BANNED_KEYWORDS = (

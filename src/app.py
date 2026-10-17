@@ -8,6 +8,7 @@ Flow per question:
   4. The result is explained in plain language by a second LLM call.
 """
 
+import json
 import logging
 import sqlite3
 import time
@@ -22,7 +23,7 @@ from db import (
     is_read_only,
     run_query,
 )
-from llm import ask_for_sql, build_system_prompt, explain
+from llm import ask_for_sql, build_system_prompt, explain, prompt_hash
 from logger import log_interaction, setup_logging
 
 log = logging.getLogger(__name__)
@@ -122,9 +123,29 @@ def print_result(result: Result, max_rows: int = 10) -> None:
     print(f"\n{LABELS.get(result.status, 'Result')}: {result.message}\n")
 
 
+def warn_if_not_validated() -> None:
+    """Warn at startup if the model/prompt in use hasn't passed the evaluation.
+
+    Only a warning: the app still runs, but the answers are unverified.
+    """
+    try:
+        validated = json.loads(Config.VALIDATED_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        log.warning("No validated model on record. Run eval/run_eval.py.")
+        return
+    if validated.get("model") != Config.MODEL:
+        log.warning(
+            "Model %s is not the validated one (%s). Run eval/run_eval.py.",
+            Config.MODEL, validated.get("model"),
+        )
+    elif validated.get("prompt_hash") != prompt_hash():
+        log.warning("The prompt changed since validation. Run eval/run_eval.py.")
+
+
 def main() -> None:
     setup_logging()
     log.info("start: db=%s model=%s", Config.DB_PATH, Config.MODEL)
+    warn_if_not_validated()
     try:
         conn = connect_readonly(Config.DB_PATH)
     except FileNotFoundError as e:

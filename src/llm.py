@@ -3,6 +3,7 @@
 Contains no database code; app.py connects this to db.py.
 """
 
+import hashlib
 import json
 import os
 
@@ -85,6 +86,15 @@ Reply with ONLY a JSON object, no other text:
 def build_system_prompt(schema: str) -> str:
     """Combine the schema description and domain notes into the system prompt."""
     return SYSTEM.format(schema=schema, notes=NOTES)
+
+
+def prompt_hash() -> str:
+    """Short fingerprint of the prompt text (template + notes, not the schema).
+
+    Stored with a validated model so we can tell when the prompt has been
+    edited since the model was last evaluated.
+    """
+    return hashlib.sha256((SYSTEM + NOTES).encode("utf-8")).hexdigest()[:12]
 
 
 def parse_json(text: str) -> dict:

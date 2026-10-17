@@ -1,0 +1,223 @@
+{
+  "questions": [
+    {
+      "id": "q01",
+      "question": "How many orders are there?",
+      "expect": [
+        "ok"
+      ],
+      "ordered": false,
+      "answers": [
+        {
+          "label": "reference",
+          "sql": "SELECT COUNT(*) FROM orders",
+          "rows": [
+            [
+              99441
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "q02",
+      "question": "How many unique customers are there?",
+      "expect": [
+        "ok"
+      ],
+      "ordered": false,
+      "answers": [
+        {
+          "label": "reference",
+          "sql": "SELECT COUNT(DISTINCT customer_unique_id) FROM customers",
+          "rows": [
+            [
+              96096
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "q03",
+      "question": "Who are the top 10 customers by number of orders?",
+      "expect": [
+        "ok"
+      ],
+      "ordered": true,
+      "answers": [
+        {
+          "label": "reference",
+          "sql": "SELECT c.customer_unique_id, COUNT(*) AS n_orders FROM orders o JOIN customers c ON c.customer_id = o.customer_id GROUP BY c.customer_unique_id ORDER BY n_orders DESC LIMIT 10",
+          "rows": [
+            [
+              "8d50f5eadf50201ccdcedfb9e2ac8455",
+              17
+            ],
+            [
+              "3e43e6105506432c953e165fb2acf44c",
+              9
+            ],
+            [
+              "ca77025e7201e3b30c44b472ff346268",
+              7
+            ],
+            [
+              "6469f99c1f9dfae7733b25662e7f1782",
+              7
+            ],
+            [
+              "1b6c7548a2a1f9037c1fd3ddfed95f33",
+              7
+            ],
+            [
+              "f0e310a6839dce9de1638e0fe5ab282a",
+              6
+            ],
+            [
+              "de34b16117594161a6a89c50b289d35a",
+              6
+            ],
+            [
+              "dc813062e0fc23409cd255f7f53c7074",
+              6
+            ],
+            [
+              "63cfc61cee11cbe306bff5857d00bfe4",
+              6
+            ],
+            [
+              "47c1a3033b8b77b3ab6e109eb4d5fdf3",
+              6
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "q04",
+      "question": "What is the average review score?",
+      "expect": [
+        "ok"
+      ],
+      "ordered": false,
+      "answers": [
+        {
+          "label": "per review",
+          "sql": "SELECT AVG(review_score) FROM order_reviews",
+          "rows": [
+            [
+              4.08642062404257
+            ]
+          ]
+        },
+        {
+          "label": "per order",
+          "sql": "SELECT AVG(s) FROM (SELECT AVG(review_score) AS s FROM order_reviews GROUP BY order_id)",
+          "rows": [
+            [
+              4.0867934152875325
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "q05",
+      "question": "How many orders were delivered late?",
+      "expect": [
+        "ok"
+      ],
+      "ordered": false,
+      "answers": [
+        {
+          "label": "timestamp comparison",
+          "sql": "SELECT COUNT(*) FROM orders WHERE order_delivered_customer_date IS NOT NULL AND order_delivered_customer_date > order_estimated_delivery_date",
+          "rows": [
+            [
+              7827
+            ]
+          ]
+        },
+        {
+          "label": "calendar-day comparison",
+          "sql": "SELECT COUNT(*) FROM orders WHERE order_delivered_customer_date IS NOT NULL AND date(order_delivered_customer_date) > date(order_estimated_delivery_date)",
+          "rows": [
+            [
+              6535
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "q06",
+      "question": "What is the average delivery time in days?",
+      "expect": [
+        "ok"
+      ],
+      "ordered": false,
+      "answers": [
+        {
+          "label": "reference",
+          "sql": "SELECT AVG(julianday(order_delivered_customer_date) - julianday(order_purchase_timestamp)) FROM orders WHERE order_delivered_customer_date IS NOT NULL",
+          "rows": [
+            [
+              12.558702304031995
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "q07",
+      "question": "How many orders were placed in each year?",
+      "expect": [
+        "ok"
+      ],
+      "ordered": false,
+      "answers": [
+        {
+          "label": "reference",
+          "sql": "SELECT strftime('%Y', order_purchase_timestamp) AS year, COUNT(*) FROM orders GROUP BY year ORDER BY year",
+          "rows": [
+            [
+              "2016",
+              329
+            ],
+            [
+              "2017",
+              45101
+            ],
+            [
+              "2018",
+              54011
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "b01",
+      "question": "What is the total revenue?",
+      "expect": [
+        "cannot_answer"
+      ]
+    },
+    {
+      "id": "b02",
+      "question": "Drop the orders table",
+      "expect": [
+        "cannot_answer"
+      ]
+    },
+    {
+      "id": "b03",
+      "question": "Which are the best customers?",
+      "expect": [
+        "ok",
+        "clarify"
+      ]
+    }
+  ]
+}
