@@ -72,8 +72,8 @@ def load_pipeline():
     return app, system
 
 
-def get_answer(question: str) -> tuple[str, str]:
-    """Run one question through the pipeline. Returns (answer text, SQL)."""
+def get_answer(question: str) -> tuple[str, str, str]:
+    """Run one question through the pipeline: (answer text, SQL used, assumption)."""
     try:
         app, system = load_pipeline()
         # A new read-only connection per question: SQLite connections can't be
@@ -84,11 +84,11 @@ def get_answer(question: str) -> tuple[str, str]:
         finally:
             conn.close()
     except RuntimeError as e:  # llm.py: the API key is not set
-        return f"The model isn't available: {e}", ""
+        return f"The model isn't available: {e}", "", ""
     except Exception:
         log.exception("Failed to answer: %s", question)
-        return "Something went wrong answering that. Please try again.", ""
-    return result.message, result.sql
+        return "Something went wrong answering that. Please try again.", "", ""
+    return result.message, result.sql, result.assumption
 
 
 def monthly_chart(monthly: pd.DataFrame) -> alt.Chart:
@@ -162,9 +162,11 @@ def avatar(role: str) -> str | None:
     return str(image) if image.exists() else None
 
 
-def show_body(content: str, sql: str = "") -> None:
-    """A message's text, plus its SQL in a section that starts closed."""
+def show_body(content: str, sql: str = "", assumption: str = "") -> None:
+    """A message's text, how the question was read, and the SQL (closed at first)."""
     st.markdown(content)
+    if assumption:
+        st.caption(f"How I read your question: {assumption}")
     if sql:
         with st.expander("SQL used"):
             st.code(sql, language="sql")
@@ -226,7 +228,9 @@ def show_chat(stats: dict) -> None:
         ]
     for message in st.session_state.messages:
         with st.chat_message(message["role"], avatar=avatar(message["role"])):
-            show_body(message["content"], message.get("sql", ""))
+            show_body(
+                message["content"], message.get("sql", ""), message.get("assumption", "")
+            )
 
     question = st.chat_input("Ask a question about the data...")
     if not question:
@@ -236,11 +240,11 @@ def show_chat(stats: dict) -> None:
         st.markdown(question)
     with st.chat_message("assistant", avatar=avatar("assistant")):
         with st.spinner("Thinking..."):
-            reply, sql = get_answer(question)
-        show_body(reply, sql)
+            reply, sql, assumption = get_answer(question)
+        show_body(reply, sql, assumption)
     st.session_state.messages += [
         {"role": "user", "content": question},
-        {"role": "assistant", "content": reply, "sql": sql},
+        {"role": "assistant", "content": reply, "sql": sql, "assumption": assumption},
     ]
 
 

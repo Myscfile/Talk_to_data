@@ -38,6 +38,7 @@ class Result:
     sql: str = ""
     columns: list[str] = field(default_factory=list)
     rows: list[tuple] = field(default_factory=list)
+    assumption: str = ""  # how the model read the question, shown separately
 
 
 def _send_back(messages: list[dict], raw: str, feedback: str) -> None:
@@ -97,7 +98,7 @@ def answer(
             continue
 
         explanation = explain(question, sql, msg, cols, rows, truncated)
-        return Result("ok", explanation, sql, cols, rows)
+        return Result("ok", explanation, sql, cols, rows, assumption=msg)
 
     return Result("error", "Couldn't produce a working query. Try rephrasing.", sql)
 
@@ -120,6 +121,8 @@ def print_result(result: Result, max_rows: int = 10) -> None:
             print(" | ".join(str(v) for v in row))
         if len(result.rows) > max_rows:
             print(f"... ({len(result.rows)} rows)")
+    if result.assumption:
+        print(f"\nHow I read your question: {result.assumption}")
     print(f"\n{LABELS.get(result.status, 'Result')}: {result.message}\n")
 
 

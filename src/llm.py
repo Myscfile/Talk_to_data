@@ -77,6 +77,10 @@ Reply with ONLY a JSON object, no other text:
   (e.g. "Interpreted 'best customers' as most orders").
 - For any per-customer question, GROUP BY customers.customer_unique_id,
   NEVER by customer_id.
+- Add context columns AFTER the figure that was asked for (it must be the first
+  column): when counting a subset (late, canceled, repeat customers), also
+  return the size of the whole group it comes from; when averaging, also
+  return COUNT(*) of the rows averaged.
 - action="clarify": too ambiguous to guess. Ask one short question in "message".
 - action="cannot_answer": the data can't answer it (missing columns, off-topic,
   a request to change data, gibberish). Explain briefly in "message".
@@ -166,10 +170,24 @@ def explain(
         f"first {PREVIEW_ROWS} shown):\n"
         f"{json.dumps(preview, default=str, ensure_ascii=False)}\n\n"
         "Answer the question in 2-4 plain sentences using these results. "
-        "Mention any assumption. If the result is empty, say so and suggest why "
-        "(e.g. date outside the data range). Do not invent numbers. "
-        "If the result looks suspicious (e.g. all values tied, all counts 1, "
-        "or suspiciously few rows), say so plainly instead of presenting it as a finding."
+        "Do not invent numbers. The assumptions are shown to the reader "
+        "separately, so do not repeat them.\n\n"
+        "Then add a short 'Context' list of at most 3 bullets, only where it "
+        "applies:\n"
+        "- Base: if the result holds a subset and the whole it comes from, give "
+        "the share, e.g. '7,827 of 96,476 delivered orders (8.1%)'.\n"
+        "- Thin data: if a figure rests on few rows (under about 100), or on the "
+        "first or last months of the data (it runs Sept 2016 to Oct 2018 and is "
+        "sparse at both ends), say it may not be representative.\n"
+        "- Reference: if the result offers a comparison (overall vs month, "
+        "average vs median), put the figure next to it.\n"
+        "- Other reading: if the question could reasonably mean something else "
+        "and give a different answer, name that reading briefly, without a "
+        "number you were not shown.\n\n"
+        "If the result is empty, say so and suggest why (e.g. date outside the "
+        "data range). If the result looks suspicious (e.g. all values tied, all "
+        "counts 1, or suspiciously few rows), say so plainly instead of "
+        "presenting it as a finding."
     )
     resp = client.chat.completions.create(
         model=Config.MODEL,
