@@ -1,10 +1,12 @@
 """Dashboard: a chat box that opens with a short intro to the data.
 
-The chat is not connected to the LLM pipeline yet: get_answer() is the one
-placeholder to replace. Run from the project folder with:
+Questions go through the same pipeline as the command-line app (app.answer).
+Run from the project folder with:
 
     streamlit run src/dashboard.py
 """
+
+import logging
 
 import altair as alt
 import pandas as pd
@@ -16,6 +18,9 @@ from db import connect_readonly
 st.set_page_config(page_title="Olist data chat", layout="wide")
 
 ROBOT = Config.BASE_DIR / "assets" / "robot.svg"  # the assistant's avatar
+USER = Config.BASE_DIR / "assets" / "user.svg"  # the user's avatar
+
+log = logging.getLogger("dashboard")
 
 
 @st.cache_data
@@ -50,9 +55,40 @@ def load_stats() -> dict:
         conn.close()
 
 
-def get_answer(question: str) -> str:
-    """Placeholder: replace with a call into the LLM pipeline (app.answer)."""
-    return "Not connected to the model yet."
+@st.cache_resource
+def load_pipeline():
+    """Import the pipeline and build its system prompt, once.
+
+    Imported here and not at the top of the file: llm.py raises if the API key
+    is missing, and that should show up as a chat message, not stop the page.
+    """
+    import app
+
+    conn = connect_readonly(Config.DB_PATH)
+    try:
+        system = app.build_system_prompt(app.describe_schema(conn))
+    finally:
+        conn.close()
+    return app, system
+
+
+def get_answer(question: str) -> tuple[str, str]:
+    """Run one question through the pipeline. Returns (answer text, SQL)."""
+    try:
+        app, system = load_pipeline()
+        # A new read-only connection per question: SQLite connections can't be
+        # shared between the threads Streamlit runs the page in.
+        conn = connect_readonly(Config.DB_PATH)
+        try:
+            result = app.answer(conn, system, question)
+        finally:
+            conn.close()
+    except RuntimeError as e:  # llm.py: the API key is not set
+        return f"The model isn't available: {e}", ""
+    except Exception:
+        log.exception("Failed to answer: %s", question)
+        return "Something went wrong answering that. Please try again.", ""
+    return result.message, result.sql
 
 
 def monthly_chart(monthly: pd.DataFrame) -> alt.Chart:
@@ -89,9 +125,9 @@ def welcome_message(stats: dict) -> str:
     """The first chat message: what the data is and how to ask about it."""
     return f"""**Hi! Ask me anything about this data.**
 
-It is e-commerce order data from Olist (Brazil): **{stats['orders']:,} orders** \
-from **{stats['customers']:,} customers**, placed between {stats['first']} and \
-{stats['last']}, with {stats['reviews']:,} reviews.
+It is e-commerce order data from Olist (Brazil): **{stats["orders"]:,} orders** \
+from **{stats["customers"]:,} customers**, placed between {stats["first"]} and \
+{stats["last"]}, with {stats["reviews"]:,} reviews.
 
 **What's in the data**
 - `orders`: status, and purchase, approval, delivery and estimated delivery dates
@@ -105,7 +141,7 @@ I can't answer questions about those.
 - Use plain English and ask one question at a time.
 - Say what you mean by vague words. "Best customers" could mean most orders, and \
 "late" could mean after the estimated delivery date.
-- The data ends in {stats['last'][:7]}, so "last month" means the latest month in the data.
+- The data ends in {stats["last"][:7]}, so "last month" means the latest month in the data.
 - Per-person questions count each customer once (`customer_unique_id`), because \
 `customer_id` changes with every order.
 
@@ -118,8 +154,20 @@ I can't answer questions about those.
 
 
 def avatar(role: str) -> str | None:
-    """The robot image for the assistant; users keep Streamlit's default."""
-    return str(ROBOT) if role == "assistant" and ROBOT.exists() else None
+    """Robot for the assistant, green person for the user.
+
+    Falls back to Streamlit's default avatar if an image file is missing.
+    """
+    image = ROBOT if role == "assistant" else USER
+    return str(image) if image.exists() else None
+
+
+def show_body(content: str, sql: str = "") -> None:
+    """A message's text, plus its SQL in a section that starts closed."""
+    st.markdown(content)
+    if sql:
+        with st.expander("SQL used"):
+            st.code(sql, language="sql")
 
 
 def pin_overview_css() -> str:
@@ -178,20 +226,22 @@ def show_chat(stats: dict) -> None:
         ]
     for message in st.session_state.messages:
         with st.chat_message(message["role"], avatar=avatar(message["role"])):
-            st.markdown(message["content"])
+            show_body(message["content"], message.get("sql", ""))
 
     question = st.chat_input("Ask a question about the data...")
     if not question:
         return
-    reply = get_answer(question)
-    st.session_state.messages += [
-        {"role": "user", "content": question},
-        {"role": "assistant", "content": reply},
-    ]
-    with st.chat_message("user"):
+    # Show the question straight away, then the reply once it is ready.
+    with st.chat_message("user", avatar=avatar("user")):
         st.markdown(question)
     with st.chat_message("assistant", avatar=avatar("assistant")):
-        st.markdown(reply)
+        with st.spinner("Thinking..."):
+            reply, sql = get_answer(question)
+        show_body(reply, sql)
+    st.session_state.messages += [
+        {"role": "user", "content": question},
+        {"role": "assistant", "content": reply, "sql": sql},
+    ]
 
 
 st.title("Chat with your data")

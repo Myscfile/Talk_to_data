@@ -18,7 +18,7 @@ class Config:
     JSON_LOG_DIR = BASE_DIR / "json_log"  # one JSON record per question
 
     # Query safety limits
-    QUERY_TIMEOUT_S = 5  # abort queries running longer than this (seconds)
+    QUERY_TIMEOUT_S = 10  # abort queries running longer than this (seconds)
     MAX_ROWS = 200  # max rows returned to the user and the explainer
 
     # LLM settings

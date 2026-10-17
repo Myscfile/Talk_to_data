@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Light green person: head with a face, shoulders -->
+  <path d="M10 58 Q10 38 32 38 Q54 38 54 58 Z" fill="#a6e3b9" stroke="#3fae67" stroke-width="3" stroke-linejoin="round"/>
+  <circle cx="32" cy="22" r="12" fill="#a6e3b9" stroke="#3fae67" stroke-width="3"/>
+  <circle cx="27.5" cy="21" r="2" fill="#1f6f43"/>
+  <circle cx="36.5" cy="21" r="2" fill="#1f6f43"/>
+  <path d="M27 27 Q32 31 37 27" fill="none" stroke="#1f6f43" stroke-width="2.5" stroke-linecap="round"/>
+</svg>
