@@ -60,6 +60,8 @@ def log_interaction(
     follow_up_of: str = "",
     session_id: str = "",
     query_seconds: float = 0.0,
+    llm_seconds: float = 0.0,
+    llm_calls: int = 0,
 ) -> None:
     """Append one question/answer record (one JSON line) to this run's file.
 
@@ -67,8 +69,9 @@ def log_interaction(
     "typed" (typed in the dashboard), "example" (a welcome-message button) or
     "follow_up" (a suggestion under an answer; follow_up_of is that answer's
     question_id). session_id tells dashboard visitors apart within one run.
-    seconds is the whole answer (model calls included); query_seconds is only the
-    time spent running SQL, summed over attempts.
+    seconds is the whole answer. Of that, query_seconds is the time spent running
+    SQL and llm_seconds the time spent waiting for the model, both summed over
+    attempts; llm_calls counts the model calls.
     """
     record = {
         "question_id": question_id,
@@ -86,6 +89,8 @@ def log_interaction(
         "suggestions": suggestions or [],
         "seconds": seconds,
         "query_seconds": query_seconds,
+        "llm_seconds": llm_seconds,
+        "llm_calls": llm_calls,
     }
     with open(_json_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")

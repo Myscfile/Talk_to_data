@@ -42,6 +42,8 @@ class Result:
     assumption: str = ""  # how the model read the question, shown separately
     suggestions: list[str] = field(default_factory=list)  # questions to try next
     query_seconds: float = 0.0  # time spent running SQL, over all attempts
+    llm_seconds: float = 0.0  # time spent waiting for the model, over all calls
+    llm_calls: int = 0  # number of model calls (SQL attempts plus the explanation)
 
 
 def _examples() -> list[str]:
@@ -81,15 +83,27 @@ def answer(
     messages = [{"role": "user", "content": question}]
     sql = ""
     query_seconds = 0.0  # summed over attempts, so a slow failed query still counts
+    llm_seconds, llm_calls = 0.0, 0  # the same for time spent waiting on the model
+
+    def timings() -> dict:
+        """The time counters, for whichever Result this question ends with."""
+        return {
+            "query_seconds": round(query_seconds, 3),
+            "llm_seconds": round(llm_seconds, 3),
+            "llm_calls": llm_calls,
+        }
 
     for attempt in range(Config.MAX_FIX_ATTEMPTS + 1):
+        llm_started = time.perf_counter()
         raw, decision = ask_for_sql(system, messages)
+        took = time.perf_counter() - llm_started
+        llm_seconds, llm_calls = llm_seconds + took, llm_calls + 1
         action = decision["action"]
         msg = decision.get("message", "")
         sql = decision.get("sql", "")
         log.info(
-            "[%s] attempt %d: action=%s sql=%s",
-            question_id, attempt + 1, action, sql,
+            "[%s] attempt %d: action=%s (model %.2f s) sql=%s",
+            question_id, attempt + 1, action, took, sql,
         )
 
         if action != "sql":
@@ -102,7 +116,7 @@ def answer(
                 status=action,
                 message=msg,
                 suggestions=suggestions,
-                query_seconds=round(query_seconds, 3),
+                **timings(),
             )
 
         # Hard refusal: never retry a write attempt, just stop.
@@ -113,7 +127,7 @@ def answer(
                 "Refused: only read-only queries are allowed.",
                 sql,
                 suggestions=_examples(),
-                query_seconds=round(query_seconds, 3),
+                **timings(),
             )
 
         problem = check_pitfalls(sql)
@@ -141,9 +155,12 @@ def answer(
         query_seconds += took
         log.info("[%s] query ran in %.3f s, %d rows", question_id, took, len(rows))
 
-        explanation, follow_ups = split_followups(
-            explain(question, sql, msg, cols, rows, truncated), _data_years(conn)
-        )
+        llm_started = time.perf_counter()
+        explained = explain(question, sql, msg, cols, rows, truncated)
+        took = time.perf_counter() - llm_started
+        llm_seconds, llm_calls = llm_seconds + took, llm_calls + 1
+        log.info("[%s] explanation written (model %.2f s)", question_id, took)
+        explanation, follow_ups = split_followups(explained, _data_years(conn))
         return Result(
             "ok",
             explanation,
@@ -152,7 +169,7 @@ def answer(
             rows,
             assumption=msg,
             suggestions=follow_ups,
-            query_seconds=round(query_seconds, 3),
+            **timings(),
         )
 
     return Result(
@@ -160,7 +177,7 @@ def answer(
         "Couldn't produce a working query. Try rephrasing, or pick one of these.",
         sql,
         suggestions=_examples(),
-        query_seconds=round(query_seconds, 3),
+        **timings(),
     )
 
 
@@ -254,6 +271,8 @@ def main() -> None:
             assumption=result.assumption,
             suggestions=result.suggestions,
             query_seconds=result.query_seconds,
+            llm_seconds=result.llm_seconds,
+            llm_calls=result.llm_calls,
         )
 
     conn.close()
