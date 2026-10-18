@@ -17,7 +17,11 @@ from db import connect_readonly
 
 st.set_page_config(page_title="Olist data chat", layout="wide")
 
-ROBOT = Config.BASE_DIR / "assets" / "robot.svg"  # the assistant's avatar
+ROBOT = (
+    Config.BASE_DIR / "assets" / "robot.svg"
+)  # kept; swap in for ASSISTANT_AVATAR to use it
+CAPYBARA = Config.BASE_DIR / "assets" / "capybara.svg"
+ASSISTANT_AVATAR = CAPYBARA  # the assistant's picture in the chat
 USER = Config.BASE_DIR / "assets" / "user.svg"  # the user's avatar
 
 log = logging.getLogger("dashboard")
@@ -150,7 +154,7 @@ def welcome_message(stats: dict) -> str:
         f"- **{name}**{TABLE_NOTES.get(name, '')}: " + ", ".join(f"`{c}`" for c in cols)
         for name, cols in stats["columns"].items()
     )
-    return f"""**Hi, I am Capi! Ask me anything about this data.**
+    return f"""**Hi, I'm Capi! Ask me about this data and I'll walk you through it.**
 
 It is e-commerce order data from Olist (Brazil): **{stats["orders"]:,} orders** \
 from **{stats["customers"]:,} customers**, placed between {stats["first"]} and \
@@ -173,17 +177,22 @@ I can't answer questions about those.
 
 
 def avatar(role: str) -> str | None:
-    """Robot for the assistant, green person for the user.
+    """Capybara for the assistant, green person for the user.
 
     Falls back to Streamlit's default avatar if an image file is missing.
     """
-    image = ROBOT if role == "assistant" else USER
+    image = ASSISTANT_AVATAR if role == "assistant" else USER
     return str(image) if image.exists() else None
 
 
 def ask_this(question: str) -> None:
     """Button callback: queue the question; show_chat picks it up on the rerun."""
     st.session_state.pending = question
+
+
+WALKING_CAPYBARA = (
+    Config.BASE_DIR / "assets" / "walking_capybara.svg"
+)  # shown while thinking
 
 
 def show_body(
@@ -296,8 +305,14 @@ def show_chat(stats: dict) -> None:
     with st.chat_message("user", avatar=avatar("user")):
         st.markdown(question)
     with st.chat_message("assistant", avatar=avatar("assistant")):
-        with st.spinner("Thinking..."):
-            reply, sql, assumption, suggestions = get_answer(question)
+        waiting = st.empty()
+        with waiting.container(horizontal=True, vertical_alignment="center"):
+            st.image(
+                str(WALKING_CAPYBARA), width=96
+            )  # the capybara walks until the answer is ready
+            st.caption("Walking...")
+        reply, sql, assumption, suggestions = get_answer(question)
+        waiting.empty()
         # The reply will sit at index len(messages) + 1, so its button ids match
         # the ones the history loop uses on the next run.
         show_body(reply, sql, assumption, suggestions, key=f"s{len(messages) + 1}")

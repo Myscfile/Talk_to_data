@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80" width="96" height="64">
+  <!-- Side-view capybara walking on the spot: barrel body, blocky head with a square
+       snout, short legs. Legs swing in opposite pairs and the body bobs.
+       Runs as an animated image, so its own CSS animation plays. -->
+  <style>
+    .leg { transform-box: fill-box; transform-origin: 50% 0%; animation: swing 0.5s ease-in-out infinite; }
+    .leg.b { animation-delay: -0.25s; }
+    .bob { animation: bob 0.5s ease-in-out infinite; }
+    .shadow { transform-box: fill-box; transform-origin: center; animation: squash 0.5s ease-in-out infinite; }
+    @keyframes swing { 0%, 100% { transform: rotate(-20deg); } 50% { transform: rotate(20deg); } }
+    @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+    @keyframes squash { 0%, 100% { transform: scaleX(1); } 50% { transform: scaleX(0.93); } }
+  </style>
+  <ellipse class="shadow" cx="62" cy="74" rx="40" ry="3" fill="#00000022"/>
+  <g class="bob">
+    <!-- far legs, behind the body -->
+    <rect class="leg" x="30" y="52" width="8" height="18" rx="3.5" fill="#7a4f2c"/>
+    <rect class="leg b" x="74" y="52" width="8" height="18" rx="3.5" fill="#7a4f2c"/>
+    <!-- barrel body, no tail -->
+    <path d="M18 43 Q16 25 38 23 L74 23 Q88 24 90 36 L90 48 Q88 58 74 58 L34 58 Q18 58 18 43 Z"
+          fill="#ad7a4b" stroke="#3f2715" stroke-width="2.6" stroke-linejoin="round"/>
+    <!-- back shading -->
+    <path d="M26 28 Q50 22 82 27" fill="none" stroke="#c4925f" stroke-width="3" stroke-linecap="round"/>
+    <!-- small ear, far back on the head -->
+    <ellipse cx="85" cy="17.5" rx="4" ry="3.5" fill="#8a5a33" stroke="#3f2715" stroke-width="2"/>
+    <!-- blocky head with a flat top and square snout -->
+    <path d="M76 31 Q76 18 89 18 L104 18 Q112 18 113 26 L114 40 Q114 47 107 47.5 L88 48.5 Q77 49 76 40 Z"
+          fill="#ad7a4b" stroke="#3f2715" stroke-width="2.6" stroke-linejoin="round"/>
+    <path d="M104 19.5 Q112 20 112.6 27 L113.2 40 Q113.2 46 107 46.3 L103 46.5 Q100 33 104 19.5 Z" fill="#8f603a"/>
+    <!-- eye set high, nostril, mouth -->
+    <ellipse cx="96" cy="25.5" rx="2.3" ry="2.1" fill="#1e140c"/>
+    <circle cx="96.8" cy="24.8" r="0.7" fill="#ffffff"/>
+    <path d="M108.5 25.5 Q110.7 25 111.6 27" fill="none" stroke="#1e140c" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M107 43 L113.4 42.6" fill="none" stroke="#3f2715" stroke-width="1.6" stroke-linecap="round"/>
+    <!-- near legs, in front of the body -->
+    <rect class="leg b" x="38" y="52" width="8" height="18" rx="3.5" fill="#9a6a40" stroke="#3f2715" stroke-width="1.6"/>
+    <rect class="leg" x="66" y="52" width="8" height="18" rx="3.5" fill="#9a6a40" stroke="#3f2715" stroke-width="1.6"/>
+  </g>
+</svg>

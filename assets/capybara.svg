@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Capybara head in profile, facing right: a blocky head with a flat top and a
+       blunt, square snout; a small ear far back; the eye and nostril set high. -->
+  <!-- small rounded ear, far back on the head -->
+  <ellipse cx="17" cy="19" rx="4.5" ry="4" fill="#8a5a33" stroke="#3f2715" stroke-width="2.2"/>
+  <!-- head -->
+  <path d="M7 36 Q6 21 20 19 L44 19 Q55 19 57 28 L58 41 Q58 48 50 49 L22 50 Q8 50 7 36 Z"
+        fill="#ad7a4b" stroke="#3f2715" stroke-width="2.6" stroke-linejoin="round"/>
+  <!-- darker snout -->
+  <path d="M45 21 Q55 21 56.5 29 L57.3 41 Q57.3 47 50 47.5 L44 47.8 Q41 34 45 21 Z" fill="#8f603a"/>
+  <!-- eye, set high -->
+  <ellipse cx="33" cy="27.5" rx="2.6" ry="2.4" fill="#1e140c"/>
+  <circle cx="33.9" cy="26.7" r="0.8" fill="#ffffff"/>
+  <!-- nostril high on the snout, and the mouth -->
+  <path d="M52 27.5 Q54.5 27 55.5 29" fill="none" stroke="#1e140c" stroke-width="2" stroke-linecap="round"/>
+  <path d="M50 43.5 L57 43" fill="none" stroke="#3f2715" stroke-width="1.8" stroke-linecap="round"/>
+</svg>
