@@ -326,9 +326,87 @@ def show_chat(stats: dict) -> None:
             "suggestions": suggestions,
         },
     ]
+    st.html(
+        f"<script>{SCROLL_TO_LATEST_JS.format(count=len(messages))}</script>",
+        unsafe_allow_javascript=True,
+    )
 
 
-st.title("Chat with your data")
+# Streamlit scrolls chat pages down to the newest message, which on first load skips
+# past the title and the start of the welcome message. Its scrolling is an animation plus
+# a "follow the bottom" flag that it only clears when it sees a scroll event on a page
+# whose size has not changed. So for the first seconds the page ignores programmatic
+# scrolling (nothing moves), harmless scroll events are sent so that flag settles to
+# "free", and scrolling is handed back once Streamlit has been quiet for a moment or the
+# visitor scrolls, clicks or types.
+KEEP_AT_TOP_JS = """
+(() => {
+  const page = document.querySelector('main');
+  if (!page) return;
+  let blocking = true;
+  let attempts = 0;  // how many times Streamlit tried to scroll the page
+  let lastAttempt = 0;
+  const top = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
+  const intoView = Element.prototype.scrollIntoView;
+  const swallow = () => { attempts += 1; lastAttempt = Date.now(); };
+  // The visitor's own scrolling (wheel, touch, keys) is native and never goes through
+  // these, so it is never blocked.
+  Object.defineProperty(page, 'scrollTop', {
+    configurable: true,
+    get() { return top.get.call(this); },
+    set(value) { if (blocking) swallow(); else top.set.call(this, value); },
+  });
+  ['scrollTo', 'scroll', 'scrollBy'].forEach((name) => {
+    page[name] = (...args) => {
+      if (blocking) swallow(); else Element.prototype[name].apply(page, args);
+    };
+  });
+  Element.prototype.scrollIntoView = function (...args) {
+    if (blocking && page.contains(this)) { swallow(); return; }
+    return intoView.apply(this, args);
+  };
+  let watcher, cap;
+  const release = () => {
+    blocking = false;
+    clearInterval(watcher);
+    clearTimeout(cap);
+    delete page.scrollTop;
+    ['scrollTo', 'scroll', 'scrollBy'].forEach((name) => delete page[name]);
+    Element.prototype.scrollIntoView = intoView;
+  };
+  watcher = setInterval(() => {
+    page.dispatchEvent(new Event('scroll'));  // lets Streamlit settle into "free"
+    // Streamlit has tried to scroll and then stopped: its animation is over.
+    if (attempts > 0 && Date.now() - lastAttempt > 1500) release();
+  }, 120);
+  ['wheel', 'touchstart', 'keydown', 'mousedown'].forEach((name) =>
+    window.addEventListener(name, release, { once: true, passive: true })
+  );
+  cap = setTimeout(release, 15000);
+})();
+"""
+
+# Streamlit's own scrolling is held back at first (above), so when a question is asked
+# the new answer is scrolled into view explicitly. The number in the comment makes each
+# script different, so that it runs again every time.
+SCROLL_TO_LATEST_JS = """
+/* {count} */
+setTimeout(() => {{
+  const page = document.querySelector('main');
+  if (page) page.scrollTo({{ top: page.scrollHeight, behavior: 'smooth' }});
+}}, 80);
+"""
+
+
+def keep_page_at_top() -> None:
+    """On the first load of a session, stop the page from sliding down to the bottom."""
+    if "scroll_reset" not in st.session_state:
+        st.session_state.scroll_reset = True
+        st.html(f"<script>{KEEP_AT_TOP_JS}</script>", unsafe_allow_javascript=True)
+
+
+keep_page_at_top()  # first, so it is in place before the page can scroll
+st.title("Querybara, chat with your data")
 try:
     stats = load_stats()
 except FileNotFoundError as e:
