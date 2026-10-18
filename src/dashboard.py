@@ -120,6 +120,7 @@ def get_answer(question: str, source: str = "typed", follow_up_of: str = "") -> 
     log.info("[%s] question (%s): %s", question_id, source, question)
     started = time.perf_counter()
     status, content, sql, assumption, suggestions, row_count = "error", "", "", "", [], 0
+    query_seconds = 0.0
     try:
         app, system = load_pipeline()
         # A new read-only connection per question: SQLite connections can't be
@@ -131,7 +132,7 @@ def get_answer(question: str, source: str = "typed", follow_up_of: str = "") -> 
             conn.close()
         status, content, sql = result.status, result.message, result.sql
         assumption, suggestions = result.assumption, result.suggestions
-        row_count = len(result.rows)
+        row_count, query_seconds = len(result.rows), result.query_seconds
     except RuntimeError as e:  # llm.py: the API key is not set
         content = f"The model isn't available: {e}"
     except Exception:
@@ -152,6 +153,7 @@ def get_answer(question: str, source: str = "typed", follow_up_of: str = "") -> 
             source=source,
             follow_up_of=follow_up_of,
             session_id=st.session_state.get("session_id", ""),
+            query_seconds=query_seconds,
         )
     except Exception:  # a logging problem must never break the chat
         log.exception("[%s] Could not write the interaction record", question_id)

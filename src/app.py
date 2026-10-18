@@ -41,6 +41,7 @@ class Result:
     rows: list[tuple] = field(default_factory=list)
     assumption: str = ""  # how the model read the question, shown separately
     suggestions: list[str] = field(default_factory=list)  # questions to try next
+    query_seconds: float = 0.0  # time spent running SQL, over all attempts
 
 
 def _examples() -> list[str]:
@@ -79,6 +80,7 @@ def answer(
     """
     messages = [{"role": "user", "content": question}]
     sql = ""
+    query_seconds = 0.0  # summed over attempts, so a slow failed query still counts
 
     for attempt in range(Config.MAX_FIX_ATTEMPTS + 1):
         raw, decision = ask_for_sql(system, messages)
@@ -96,7 +98,12 @@ def answer(
             )
             if not suggestions and action == "cannot_answer":
                 suggestions = _examples()
-            return Result(status=action, message=msg, suggestions=suggestions)
+            return Result(
+                status=action,
+                message=msg,
+                suggestions=suggestions,
+                query_seconds=round(query_seconds, 3),
+            )
 
         # Hard refusal: never retry a write attempt, just stop.
         if not is_read_only(sql):
@@ -106,6 +113,7 @@ def answer(
                 "Refused: only read-only queries are allowed.",
                 sql,
                 suggestions=_examples(),
+                query_seconds=round(query_seconds, 3),
             )
 
         problem = check_pitfalls(sql)
@@ -117,20 +125,34 @@ def answer(
             _send_back(messages, raw, problem)
             continue
 
+        query_started = time.perf_counter()
         try:
             cols, rows, truncated = run_query(conn, sql)
         except sqlite3.Error as e:
+            took = time.perf_counter() - query_started
+            query_seconds += took
             log.info(
-                "[%s] query failed (attempt %d): %s", question_id, attempt + 1, e
+                "[%s] query failed after %.2f s (attempt %d): %s",
+                question_id, took, attempt + 1, e,
             )
             _send_back(messages, raw, f"That query failed: {e}.")
             continue
+        took = time.perf_counter() - query_started
+        query_seconds += took
+        log.info("[%s] query ran in %.3f s, %d rows", question_id, took, len(rows))
 
         explanation, follow_ups = split_followups(
             explain(question, sql, msg, cols, rows, truncated), _data_years(conn)
         )
         return Result(
-            "ok", explanation, sql, cols, rows, assumption=msg, suggestions=follow_ups
+            "ok",
+            explanation,
+            sql,
+            cols,
+            rows,
+            assumption=msg,
+            suggestions=follow_ups,
+            query_seconds=round(query_seconds, 3),
         )
 
     return Result(
@@ -138,6 +160,7 @@ def answer(
         "Couldn't produce a working query. Try rephrasing, or pick one of these.",
         sql,
         suggestions=_examples(),
+        query_seconds=round(query_seconds, 3),
     )
 
 
@@ -230,6 +253,7 @@ def main() -> None:
             seconds=round(time.perf_counter() - started, 2),
             assumption=result.assumption,
             suggestions=result.suggestions,
+            query_seconds=result.query_seconds,
         )
 
     conn.close()
