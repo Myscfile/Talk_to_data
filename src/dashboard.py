@@ -162,7 +162,7 @@ from **{stats["customers"]:,} customers**, placed between {stats["first"]} and \
 **Not in the data:** prices, revenue, payments, products, sellers, customer age or gender. \
 I can't answer questions about those.
 
-**How to ask**
+**How to ask questions**
 - Use plain English and ask one question at a time.
 - Be specific. Words like "best" or "late" can mean several things, so say which: \
 "customers with the most orders", or "delivered after the estimated delivery date".
