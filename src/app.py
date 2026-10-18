@@ -243,6 +243,58 @@ def answer(
     )
 
 
+def ask(
+    conn: sqlite3.Connection,
+    system: str,
+    question: str,
+    *,
+    source: str = "cli",
+    follow_up_of: str = "",
+    session_id: str = "",
+) -> tuple[Result, str]:
+    """Answer one question and log it: the part both front ends share.
+
+    Wraps answer() with a question_id, timing, a safety net for unexpected errors
+    (network down, API error, ...) and the interaction record in json_log/. Never
+    raises. Returns the Result and the question_id, so the dashboard can link a
+    follow-up question to the answer it came from.
+
+    source, follow_up_of and session_id are only stored in the log record; see
+    log_interaction() for what they mean.
+    """
+    question_id = uuid.uuid4().hex[:8]
+    log.info("[%s] question (%s): %s", question_id, source, question)
+    started = time.perf_counter()
+    try:
+        result = answer(conn, system, question, question_id)
+    except Exception:
+        log.exception("[%s] Something went wrong answering that question", question_id)
+        result = Result("error", "Something went wrong answering that. Please try again.")
+
+    try:
+        log_interaction(
+            question_id=question_id,
+            question=question,
+            status=result.status,
+            answer=result.message,
+            sql=result.sql,
+            row_count=len(result.rows),
+            seconds=round(time.perf_counter() - started, 2),
+            assumption=result.assumption,
+            suggestions=result.suggestions,
+            source=source,
+            follow_up_of=follow_up_of,
+            session_id=session_id,
+            query_seconds=result.query_seconds,
+            llm_seconds=result.llm_seconds,
+            llm_calls=result.llm_calls,
+            tokens={field: getattr(result, field) for field in TOKEN_FIELDS},
+        )
+    except Exception:  # a logging problem must never break the answer
+        log.exception("[%s] Could not write the interaction record", question_id)
+    return result, question_id
+
+
 LABELS = {
     "ok": "Answer",
     "clarify": "Need clarification",
@@ -312,34 +364,8 @@ def main() -> None:
             break
         if not question:
             continue
-        question_id = uuid.uuid4().hex[:8]
-        log.info("[%s] question: %s", question_id, question)
-        started = time.perf_counter()
-        try:
-            result = answer(conn, system, question, question_id)
-            print_result(result)
-        except Exception:
-            # Top-level safety net (network down, API error, ...): keep the app
-            # running and show the error instead of crashing the whole session.
-            log.exception(
-                "[%s] Something went wrong answering that question", question_id
-            )
-            result = Result("error", "")
-        log_interaction(
-            question_id=question_id,
-            question=question,
-            status=result.status,
-            answer=result.message,
-            sql=result.sql,
-            row_count=len(result.rows),
-            seconds=round(time.perf_counter() - started, 2),
-            assumption=result.assumption,
-            suggestions=result.suggestions,
-            query_seconds=result.query_seconds,
-            llm_seconds=result.llm_seconds,
-            llm_calls=result.llm_calls,
-            tokens={field: getattr(result, field) for field in TOKEN_FIELDS},
-        )
+        result, _ = ask(conn, system, question)
+        print_result(result)
 
     conn.close()
 

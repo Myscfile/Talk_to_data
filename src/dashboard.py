@@ -1,13 +1,12 @@
 """Dashboard: a chat box that opens with a short intro to the data.
 
-Questions go through the same pipeline as the command-line app (app.answer).
+Questions go through the same pipeline and logging as the command-line app (app.ask).
 Run from the project folder with:
 
     streamlit run src/dashboard.py
 """
 
 import logging
-import time
 import uuid
 
 import altair as alt
@@ -16,7 +15,7 @@ import streamlit as st
 
 from config import Config
 from db import connect_readonly
-from logger import TOKEN_FIELDS, log_interaction, setup_logging
+from logger import setup_logging
 
 st.set_page_config(page_title="Olist data chat", layout="wide")
 
@@ -110,65 +109,54 @@ def start_logging() -> bool:
 
 
 def get_answer(question: str, source: str = "typed", follow_up_of: str = "") -> dict:
-    """Run one question through the pipeline and log it, like the command-line app.
+    """Run one question through app.ask(), which answers and logs it.
 
     source is where the question came from: "typed", "example" (a welcome button)
     or "follow_up" (a suggestion under the answer whose question_id is
     follow_up_of). Returns the reply as the fields of a chat message.
     """
-    question_id = uuid.uuid4().hex[:8]
-    log.info("[%s] question (%s): %s", question_id, source, question)
-    started = time.perf_counter()
-    status, content, sql, assumption, suggestions, row_count = "error", "", "", "", [], 0
-    query_seconds, llm_seconds, llm_calls, tokens = 0.0, 0.0, 0, {}
     try:
         app, system = load_pipeline()
         # A new read-only connection per question: SQLite connections can't be
         # shared between the threads Streamlit runs the page in.
         conn = connect_readonly(Config.DB_PATH)
-        try:
-            result = app.answer(conn, system, question, question_id)
-        finally:
-            conn.close()
-        status, content, sql = result.status, result.message, result.sql
-        assumption, suggestions = result.assumption, result.suggestions
-        row_count, query_seconds = len(result.rows), result.query_seconds
-        llm_seconds, llm_calls = result.llm_seconds, result.llm_calls
-        tokens = {field: getattr(result, field) for field in TOKEN_FIELDS}
     except RuntimeError as e:  # llm.py: the API key is not set
-        content = f"The model isn't available: {e}"
+        log.warning("Model not available: %s", e)
+        return _reply("", f"The model isn't available: {e}")
     except Exception:
-        log.exception("[%s] Failed to answer: %s", question_id, question)
-        content = "Something went wrong answering that. Please try again."
+        log.exception("Could not start answering: %s", question)
+        return _reply("", "Something went wrong answering that. Please try again.")
 
     try:
-        log_interaction(
-            question_id=question_id,
-            question=question,
-            status=status,
-            answer=content,
-            sql=sql,
-            row_count=row_count,
-            seconds=round(time.perf_counter() - started, 2),
-            assumption=assumption,
-            suggestions=suggestions,
+        result, question_id = app.ask(
+            conn,
+            system,
+            question,
             source=source,
             follow_up_of=follow_up_of,
             session_id=st.session_state.get("session_id", ""),
-            query_seconds=query_seconds,
-            llm_seconds=llm_seconds,
-            llm_calls=llm_calls,
-            tokens=tokens,
         )
-    except Exception:  # a logging problem must never break the chat
-        log.exception("[%s] Could not write the interaction record", question_id)
+    finally:
+        conn.close()
+    return _reply(
+        question_id, result.message, result.sql, result.assumption, result.suggestions
+    )
 
+
+def _reply(
+    question_id: str,
+    content: str,
+    sql: str = "",
+    assumption: str = "",
+    suggestions: list[str] | None = None,
+) -> dict:
+    """The fields of an assistant chat message."""
     return {
         "question_id": question_id,
         "content": content,
         "sql": sql,
         "assumption": assumption,
-        "suggestions": suggestions,
+        "suggestions": suggestions or [],
     }
 
 
