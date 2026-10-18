@@ -154,6 +154,56 @@ class Suggestions(unittest.TestCase):
         self.assertEqual(questions, [])
         self.assertEqual(explanation, self.BODY)
 
+    YEARS = {2016, 2017, 2018}
+
+    def test_years_outside_the_data_are_dropped(self):
+        raw = [
+            "How many orders were placed in 2019?",
+            "Did late deliveries rise in 2020 compared with 2018?",
+            "How many orders were placed in 2017?",
+            "How many orders were placed in 2016, 2017 and 2018 together?",
+        ]
+        self.assertEqual(
+            clean_questions(raw, self.YEARS),
+            ["How many orders were placed in 2017?", "How many orders were placed in 2016, 2017 and 2018 together?"],
+        )
+
+    def test_topics_and_future_the_data_lacks_are_dropped(self):
+        for question in (
+            "What is the revenue per order?",
+            "Which product categories sell best?",
+            "What is the average price of delivered orders?",
+            "Which sellers have the slowest delivery?",
+            "How many orders will there be next year?",
+            "Can you forecast orders for the coming months?",
+        ):
+            self.assertEqual(clean_questions([question], self.YEARS), [], question)
+
+    def test_normal_questions_are_kept(self):
+        questions = [
+            "What is the average delivery time in days?",
+            "Who are the top 10 customers by number of orders?",
+            "Which state has the most customers?",  # contains no banned word
+            "What is the average review score by month?",  # 'average' is not 'age'
+        ]
+        self.assertEqual(len(clean_questions(questions[:3], self.YEARS)), 3)
+        self.assertEqual(clean_questions(questions[3:], self.YEARS), questions[3:])
+
+    def test_without_years_only_topics_are_checked(self):
+        self.assertEqual(len(clean_questions(["How many orders were placed in 2019?"])), 1)
+        self.assertEqual(clean_questions(["What is the revenue per order?"]), [])
+
+    def test_split_followups_filters_too(self):
+        text = (
+            "There are 99,441 orders.\n\nFOLLOW-UPS:\n"
+            "- What happened to orders in 2019?\n"
+            "- How many orders were canceled?\n"
+            "- What is the total revenue?"
+        )
+        explanation, questions = split_followups(text, self.YEARS)
+        self.assertEqual(questions, ["How many orders were canceled?"])
+        self.assertNotIn("FOLLOW", explanation)
+
     def test_bad_input_gives_no_suggestions(self):
         for value in (None, "a string", 5, {"a": 1}, [None, 3, "", "hi"], ["x" * 500]):
             self.assertEqual(clean_questions(value), [], value)

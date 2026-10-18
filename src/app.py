@@ -48,6 +48,20 @@ def _examples() -> list[str]:
     return list(Config.EXAMPLE_QUESTIONS[:3])
 
 
+_years: set[int] = set()  # the years the data covers, read from the database once
+
+
+def _data_years(conn: sqlite3.Connection) -> set[int] | None:
+    """Years that have orders, so a suggestion can't point outside the data."""
+    if not _years:
+        first, last = conn.execute(
+            "SELECT MIN(order_purchase_timestamp), MAX(order_purchase_timestamp) FROM orders"
+        ).fetchone()
+        if first and last:
+            _years.update(range(int(first[:4]), int(last[:4]) + 1))
+    return _years or None
+
+
 def _send_back(messages: list[dict], raw: str, feedback: str) -> None:
     """Add the model's previous reply plus our feedback, so it can retry."""
     messages.append({"role": "assistant", "content": raw})
@@ -77,7 +91,9 @@ def answer(
         )
 
         if action != "sql":
-            suggestions = clean_questions(decision.get("suggestions"))
+            suggestions = clean_questions(
+                decision.get("suggestions"), _data_years(conn)
+            )
             if not suggestions and action == "cannot_answer":
                 suggestions = _examples()
             return Result(status=action, message=msg, suggestions=suggestions)
@@ -111,7 +127,7 @@ def answer(
             continue
 
         explanation, follow_ups = split_followups(
-            explain(question, sql, msg, cols, rows, truncated)
+            explain(question, sql, msg, cols, rows, truncated), _data_years(conn)
         )
         return Result(
             "ok", explanation, sql, cols, rows, assumption=msg, suggestions=follow_ups

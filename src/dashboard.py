@@ -23,6 +23,20 @@ USER = Config.BASE_DIR / "assets" / "user.svg"  # the user's avatar
 log = logging.getLogger("dashboard")
 
 
+def table_columns(conn) -> dict[str, list[str]]:
+    """Every table and its column names, read from the database itself."""
+    names = [
+        r[0]
+        for r in conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        )
+    ]
+    order = ["orders", "customers", "order_reviews"]  # the main table first
+    names.sort(key=lambda n: order.index(n) if n in order else len(order))
+    return {n: [r[1] for r in conn.execute(f'PRAGMA table_info("{n}")')] for n in names}
+
+
 @st.cache_data
 def load_stats() -> dict:
     """Read a few summary numbers from the database (read-only), once."""
@@ -40,6 +54,7 @@ def load_stats() -> dict:
             "reviews": one("SELECT COUNT(*) FROM order_reviews"),
             "first": first[:10],
             "last": last[:10],
+            "columns": table_columns(conn),
             "status": pd.read_sql_query(
                 "SELECT order_status, COUNT(*) AS orders FROM orders "
                 "GROUP BY order_status ORDER BY orders DESC",
@@ -121,26 +136,36 @@ def status_chart(status: pd.DataFrame) -> alt.Chart:
     )
 
 
+# What one row means in each table: the part a column name alone does not tell you.
+TABLE_NOTES = {
+    "orders": " (one row per order)",
+    "customers": " (one row per order's buyer; one person can appear in several rows)",
+    "order_reviews": " (one row per review; an order can have more than one)",
+}
+
+
 def welcome_message(stats: dict) -> str:
     """The first chat message: what the data is and how to ask about it."""
-    return f"""**Hi! Ask me anything about this data.**
+    table_lines = "\n".join(
+        f"- **{name}**{TABLE_NOTES.get(name, '')}: " + ", ".join(f"`{c}`" for c in cols)
+        for name, cols in stats["columns"].items()
+    )
+    return f"""**Hi, I am Capi! Ask me anything about this data.**
 
 It is e-commerce order data from Olist (Brazil): **{stats["orders"]:,} orders** \
 from **{stats["customers"]:,} customers**, placed between {stats["first"]} and \
 {stats["last"]}, with {stats["reviews"]:,} reviews.
 
-**What's in the data**
-- `orders`: status, and purchase, approval, delivery and estimated delivery dates
-- `customers`: city and state
-- `order_reviews`: score (1-5) and comments
+**What's in the data** (every table and its columns)
+{table_lines}
 
 **Not in the data:** prices, revenue, payments, products, sellers, customer age or gender. \
 I can't answer questions about those.
 
 **How to ask**
 - Use plain English and ask one question at a time.
-- Say what you mean by vague words. "Best customers" could mean most orders, and \
-"late" could mean after the estimated delivery date.
+- Be specific. Words like "best" or "late" can mean several things, so say which: \
+"customers with the most orders", or "delivered after the estimated delivery date".
 - The data ends in {stats["last"][:7]}, so "last month" means the latest month in the data.
 - Per-person questions count each customer once (`customer_unique_id`), because \
 `customer_id` changes with every order.

@@ -89,7 +89,9 @@ Reply with ONLY a JSON object, no other text:
   data is missing. In "suggestions" give 2-3 complete questions that this data
   CAN answer and that are close to what the user wanted.
 - Every suggestion must be answerable with the tables above and must make sense
-  on its own (never "and for 2018?"). For action="sql" leave "suggestions" empty.
+  on its own (never "and for 2018?"). It must stay inside the data: only the
+  period Sept 2016 to Oct 2018, never a later year such as 2019 or the future.
+  For action="sql" leave "suggestions" empty.
 """
 
 
@@ -198,7 +200,9 @@ def explain(
         "'- ', each a complete question that makes sense on its own, goes a "
         "step deeper than this answer, and can be answered from the orders, "
         "customers and order_reviews tables (never prices, revenue, products or "
-        "sellers). Write nothing after them."
+        "sellers). They must stay inside the data: only the period Sept 2016 to "
+        "Oct 2018, never a later year such as 2019 and nothing about the future. "
+        "Write nothing after them."
     )
     resp = client.chat.completions.create(
         model=Config.MODEL,
