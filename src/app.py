@@ -68,7 +68,7 @@ _years: set[int] = set()  # the years the data covers, read from the database on
 
 
 def _data_years(conn: sqlite3.Connection) -> set[int] | None:
-    """Years that have orders, so a suggestion can't point outside the data."""
+    """Years that have orders, so a suggested follow ups can't point outside the data."""
     if not _years:
         first, last = conn.execute(
             "SELECT MIN(order_purchase_timestamp), MAX(order_purchase_timestamp) FROM orders"
@@ -91,7 +91,34 @@ def answer(
 ) -> Result:
     """Answer one question, letting the model fix its own SQL if needed.
 
-    question_id only tags the diagnostic log lines for this question.
+    This is the whole pipeline for one question. It returns a Result, and every
+    exit path fills in the same timing and token counts.
+
+    The loop runs at most MAX_FIX_ATTEMPTS + 1 times. Each pass:
+
+    1. Asks the model for a decision (ask_for_sql). The model answers with one of
+       three actions:
+       - "clarify" or "cannot_answer": return at once, with the model's message
+         and suggested questions (cannot_answer falls back to the example questions
+         if the model gave none).
+       - "sql": go on to the checks below.
+    2. Refuses any query that is not a single read-only SELECT/WITH (is_read_only).
+       A refusal is final: the query is never retried.
+    3. Checks the query for known data pitfalls (check_pitfalls). If it fails,
+       the reason is sent back to the model and the loop continues.
+    4. Runs the query (run_query) with a time limit and a row cap. If SQLite
+       reports an error or the time limit is hit, the error is sent back to the
+       model and the loop continues.
+    5. If the query ran, asks the model to explain the rows (explain). The
+       explanation and the follow-up questions are split apart (split_followups),
+       and the function returns status "ok".
+
+    Feedback to the model (_send_back) adds the model's own previous reply and the
+    reason it failed, so the next attempt can correct it. If every attempt fails,
+    the function returns status "error" with the last SQL and the example questions.
+
+    question_id only tags the diagnostic log lines for this question. The
+    token counters are reset here so each question's tokens are counted alone.
     """
     messages = [{"role": "user", "content": question}]
     sql = ""
@@ -121,7 +148,12 @@ def answer(
         sql = decision.get("sql", "")
         log.info(
             "[%s] attempt %d: action=%s (model %.2f s, %d tokens) sql=%s",
-            question_id, attempt + 1, action, took, tokens, sql,
+            question_id,
+            attempt + 1,
+            action,
+            took,
+            tokens,
+            sql,
         )
 
         if action != "sql":
@@ -152,7 +184,9 @@ def answer(
         if problem:
             log.info(
                 "[%s] guard rejected (attempt %d): %s",
-                question_id, attempt + 1, problem,
+                question_id,
+                attempt + 1,
+                problem,
             )
             _send_back(messages, raw, problem)
             continue
@@ -165,7 +199,10 @@ def answer(
             query_seconds += took
             log.info(
                 "[%s] query failed after %.2f s (attempt %d): %s",
-                question_id, took, attempt + 1, e,
+                question_id,
+                took,
+                attempt + 1,
+                e,
             )
             _send_back(messages, raw, f"That query failed: {e}.")
             continue
@@ -180,7 +217,10 @@ def answer(
         tokens = usage()["total_tokens"] - tokens_before
         llm_seconds, llm_calls = llm_seconds + took, llm_calls + 1
         log.info(
-            "[%s] explanation written (model %.2f s, %d tokens)", question_id, took, tokens
+            "[%s] explanation written (model %.2f s, %d tokens)",
+            question_id,
+            took,
+            tokens,
         )
         explanation, follow_ups = split_followups(explained, _data_years(conn))
         return Result(
@@ -244,7 +284,8 @@ def warn_if_not_validated() -> None:
     if validated.get("model") != Config.MODEL:
         log.warning(
             "Model %s is not the validated one (%s). Run eval/run_eval.py.",
-            Config.MODEL, validated.get("model"),
+            Config.MODEL,
+            validated.get("model"),
         )
     elif validated.get("prompt_hash") != prompt_hash():
         log.warning("The prompt changed since validation. Run eval/run_eval.py.")
@@ -280,7 +321,9 @@ def main() -> None:
         except Exception:
             # Top-level safety net (network down, API error, ...): keep the app
             # running and show the error instead of crashing the whole session.
-            log.exception("[%s] Something went wrong answering that question", question_id)
+            log.exception(
+                "[%s] Something went wrong answering that question", question_id
+            )
             result = Result("error", "")
         log_interaction(
             question_id=question_id,
