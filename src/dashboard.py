@@ -7,6 +7,8 @@ Run from the project folder with:
 """
 
 import logging
+import time
+import uuid
 
 import altair as alt
 import pandas as pd
@@ -14,6 +16,7 @@ import streamlit as st
 
 from config import Config
 from db import connect_readonly
+from logger import log_interaction, setup_logging
 
 st.set_page_config(page_title="Olist data chat", layout="wide")
 
@@ -91,23 +94,75 @@ def load_pipeline():
     return app, system
 
 
-def get_answer(question: str) -> tuple[str, str, str, list[str]]:
-    """Run one question: (answer text, SQL used, assumption, suggested questions)."""
+@st.cache_resource
+def start_logging() -> bool:
+    """Open this server's log files once (Streamlit reruns the script on every click).
+
+    If the log folders can't be created the app still runs, just without logs.
+    """
+    try:
+        setup_logging()
+    except OSError:
+        log.exception("Logging could not be started; continuing without log files")
+        return False
+    log.info("dashboard start: db=%s model=%s", Config.DB_PATH, Config.MODEL)
+    return True
+
+
+def get_answer(question: str, source: str = "typed", follow_up_of: str = "") -> dict:
+    """Run one question through the pipeline and log it, like the command-line app.
+
+    source is where the question came from: "typed", "example" (a welcome button)
+    or "follow_up" (a suggestion under the answer whose question_id is
+    follow_up_of). Returns the reply as the fields of a chat message.
+    """
+    question_id = uuid.uuid4().hex[:8]
+    log.info("[%s] question (%s): %s", question_id, source, question)
+    started = time.perf_counter()
+    status, content, sql, assumption, suggestions, row_count = "error", "", "", "", [], 0
     try:
         app, system = load_pipeline()
         # A new read-only connection per question: SQLite connections can't be
         # shared between the threads Streamlit runs the page in.
         conn = connect_readonly(Config.DB_PATH)
         try:
-            result = app.answer(conn, system, question)
+            result = app.answer(conn, system, question, question_id)
         finally:
             conn.close()
+        status, content, sql = result.status, result.message, result.sql
+        assumption, suggestions = result.assumption, result.suggestions
+        row_count = len(result.rows)
     except RuntimeError as e:  # llm.py: the API key is not set
-        return f"The model isn't available: {e}", "", "", []
+        content = f"The model isn't available: {e}"
     except Exception:
-        log.exception("Failed to answer: %s", question)
-        return "Something went wrong answering that. Please try again.", "", "", []
-    return result.message, result.sql, result.assumption, result.suggestions
+        log.exception("[%s] Failed to answer: %s", question_id, question)
+        content = "Something went wrong answering that. Please try again."
+
+    try:
+        log_interaction(
+            question_id=question_id,
+            question=question,
+            status=status,
+            answer=content,
+            sql=sql,
+            row_count=row_count,
+            seconds=round(time.perf_counter() - started, 2),
+            assumption=assumption,
+            suggestions=suggestions,
+            source=source,
+            follow_up_of=follow_up_of,
+            session_id=st.session_state.get("session_id", ""),
+        )
+    except Exception:  # a logging problem must never break the chat
+        log.exception("[%s] Could not write the interaction record", question_id)
+
+    return {
+        "question_id": question_id,
+        "content": content,
+        "sql": sql,
+        "assumption": assumption,
+        "suggestions": suggestions,
+    }
 
 
 def monthly_chart(monthly: pd.DataFrame) -> alt.Chart:
@@ -185,9 +240,16 @@ def avatar(role: str) -> str | None:
     return str(image) if image.exists() else None
 
 
-def ask_this(question: str) -> None:
-    """Button callback: queue the question; show_chat picks it up on the rerun."""
-    st.session_state.pending = question
+def ask_this(question: str, source: str, follow_up_of: str = "") -> None:
+    """Button callback: queue the question; show_chat picks it up on the rerun.
+
+    source and follow_up_of travel with it, so the log shows where it came from.
+    """
+    st.session_state.pending = {
+        "question": question,
+        "source": source,
+        "follow_up_of": follow_up_of,
+    }
 
 
 WALKING_CAPYBARA = (
@@ -201,9 +263,12 @@ def show_body(
     assumption: str = "",
     suggestions: tuple | list = (),
     key: str = "",
+    button_source: str = "follow_up",
+    follow_up_of: str = "",
 ) -> None:
     """A message's text, how the question was read, the SQL (closed at first)
-    and suggested questions as buttons. key keeps the buttons' ids unique."""
+    and suggested questions as buttons. key keeps the buttons' ids unique;
+    button_source and follow_up_of say, for the log, where a clicked one came from."""
     st.markdown(content)
     if assumption:
         st.caption(f"How I read your question: {assumption}")
@@ -217,7 +282,7 @@ def show_body(
                 suggestion,
                 key=f"{key}-{i}",
                 on_click=ask_this,
-                args=(suggestion,),
+                args=(suggestion, button_source, follow_up_of),
                 width="stretch",
             )
 
@@ -281,10 +346,17 @@ def show_chat(stats: dict) -> None:
             }
         ]
     messages = st.session_state.messages
+    st.session_state.setdefault("session_id", uuid.uuid4().hex[:8])
 
     # A clicked suggestion is queued in session state and handled like typed input.
     typed = st.chat_input("Ask a question about the data...")
-    question = st.session_state.pop("pending", None) or typed
+    pending = st.session_state.pop("pending", None)
+    if pending:
+        question, source, follow_up_of = (
+            pending["question"], pending["source"], pending["follow_up_of"]
+        )
+    else:
+        question, source, follow_up_of = typed, "typed", ""
 
     for i, message in enumerate(messages):
         # Suggestion buttons only under the newest message, and not while a new
@@ -297,6 +369,10 @@ def show_chat(stats: dict) -> None:
                 message.get("assumption", ""),
                 message.get("suggestions", ()) if show_buttons else (),
                 key=f"s{i}",
+                # Buttons under the welcome message are examples; under an answer
+                # they are follow-ups to that answer.
+                button_source="follow_up" if message.get("question_id") else "example",
+                follow_up_of=message.get("question_id", ""),
             )
 
     if not question:
@@ -311,20 +387,21 @@ def show_chat(stats: dict) -> None:
                 str(WALKING_CAPYBARA), width=96
             )  # the capybara walks until the answer is ready
             st.caption("Walking...")
-        reply, sql, assumption, suggestions = get_answer(question)
+        reply = get_answer(question, source, follow_up_of)
         waiting.empty()
         # The reply will sit at index len(messages) + 1, so its button ids match
         # the ones the history loop uses on the next run.
-        show_body(reply, sql, assumption, suggestions, key=f"s{len(messages) + 1}")
+        show_body(
+            reply["content"],
+            reply["sql"],
+            reply["assumption"],
+            reply["suggestions"],
+            key=f"s{len(messages) + 1}",
+            follow_up_of=reply["question_id"],
+        )
     messages += [
         {"role": "user", "content": question},
-        {
-            "role": "assistant",
-            "content": reply,
-            "sql": sql,
-            "assumption": assumption,
-            "suggestions": suggestions,
-        },
+        {"role": "assistant", **reply},
     ]
     st.html(
         f"<script>{SCROLL_TO_LATEST_JS.format(count=len(messages))}</script>",
@@ -406,6 +483,7 @@ def keep_page_at_top() -> None:
 
 
 keep_page_at_top()  # first, so it is in place before the page can scroll
+start_logging()
 st.title("Querybara, chat with your data")
 try:
     stats = load_stats()

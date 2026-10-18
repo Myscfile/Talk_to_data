@@ -54,17 +54,33 @@ def log_interaction(
     sql: str,
     row_count: int,
     seconds: float,
+    assumption: str = "",
+    suggestions: list[str] | None = None,
+    source: str = "cli",
+    follow_up_of: str = "",
+    session_id: str = "",
 ) -> None:
-    """Append one question/answer record (one JSON line) to this run's file."""
+    """Append one question/answer record (one JSON line) to this run's file.
+
+    source is where the question came from: "cli" (typed in the terminal),
+    "typed" (typed in the dashboard), "example" (a welcome-message button) or
+    "follow_up" (a suggestion under an answer; follow_up_of is that answer's
+    question_id). session_id tells dashboard visitors apart within one run.
+    """
     record = {
         "question_id": question_id,
         "run_id": RUN_ID,
+        "session_id": session_id,
         "ts": datetime.now().isoformat(timespec="seconds"),
+        "source": source,
+        "follow_up_of": follow_up_of,
         "question": question,
         "status": status,
         "answer": answer,
+        "assumption": assumption,
         "sql": sql,
         "row_count": row_count,
+        "suggestions": suggestions or [],
         "seconds": seconds,
     }
     with open(_json_file, "a", encoding="utf-8") as f:

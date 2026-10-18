@@ -228,6 +228,8 @@ def main() -> None:
             sql=result.sql,
             row_count=len(result.rows),
             seconds=round(time.perf_counter() - started, 2),
+            assumption=result.assumption,
+            suggestions=result.suggestions,
         )
 
     conn.close()
