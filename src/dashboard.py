@@ -16,7 +16,7 @@ import streamlit as st
 
 from config import Config
 from db import connect_readonly
-from logger import log_interaction, setup_logging
+from logger import TOKEN_FIELDS, log_interaction, setup_logging
 
 st.set_page_config(page_title="Olist data chat", layout="wide")
 
@@ -120,7 +120,7 @@ def get_answer(question: str, source: str = "typed", follow_up_of: str = "") -> 
     log.info("[%s] question (%s): %s", question_id, source, question)
     started = time.perf_counter()
     status, content, sql, assumption, suggestions, row_count = "error", "", "", "", [], 0
-    query_seconds, llm_seconds, llm_calls = 0.0, 0.0, 0
+    query_seconds, llm_seconds, llm_calls, tokens = 0.0, 0.0, 0, {}
     try:
         app, system = load_pipeline()
         # A new read-only connection per question: SQLite connections can't be
@@ -134,6 +134,7 @@ def get_answer(question: str, source: str = "typed", follow_up_of: str = "") -> 
         assumption, suggestions = result.assumption, result.suggestions
         row_count, query_seconds = len(result.rows), result.query_seconds
         llm_seconds, llm_calls = result.llm_seconds, result.llm_calls
+        tokens = {field: getattr(result, field) for field in TOKEN_FIELDS}
     except RuntimeError as e:  # llm.py: the API key is not set
         content = f"The model isn't available: {e}"
     except Exception:
@@ -157,6 +158,7 @@ def get_answer(question: str, source: str = "typed", follow_up_of: str = "") -> 
             query_seconds=query_seconds,
             llm_seconds=llm_seconds,
             llm_calls=llm_calls,
+            tokens=tokens,
         )
     except Exception:  # a logging problem must never break the chat
         log.exception("[%s] Could not write the interaction record", question_id)

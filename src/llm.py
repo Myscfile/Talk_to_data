@@ -6,11 +6,13 @@ Contains no database code; app.py connects this to db.py.
 import hashlib
 import json
 import os
+import threading
 
 from cerebras.cloud.sdk import Cerebras
 from dotenv import load_dotenv
 
 from config import Config
+from logger import TOKEN_FIELDS
 
 load_dotenv(Config.BASE_DIR / ".env")
 
@@ -20,6 +22,47 @@ if "CEREBRAS_API_KEY" not in os.environ:
     )
 
 client = Cerebras(api_key=os.environ["CEREBRAS_API_KEY"])
+
+# Token usage, added up per question: app.answer() calls reset_usage() first and
+# usage() at the end. Kept per thread because the dashboard answers several
+# visitors at once, each in its own thread. Not part of the return values, so
+# stand-in functions in tests (which make no API calls) simply count nothing.
+USAGE_FIELDS = TOKEN_FIELDS  # the same names the log uses
+_usage = threading.local()
+
+
+def reset_usage() -> None:
+    """Start counting tokens from zero (once per question)."""
+    _usage.counts = dict.fromkeys(USAGE_FIELDS, 0)
+
+
+def usage() -> dict:
+    """Tokens used by the model calls since the last reset_usage()."""
+    return dict(getattr(_usage, "counts", None) or dict.fromkeys(USAGE_FIELDS, 0))
+
+
+def _count_usage(resp) -> None:
+    """Add one response's token usage to the counters.
+
+    reasoning_tokens (the model thinking before it answers) are part of
+    completion_tokens; cached_tokens are part of prompt_tokens.
+    """
+    u = getattr(resp, "usage", None)
+    if u is None:
+        return
+    if getattr(_usage, "counts", None) is None:
+        reset_usage()
+    details_out = getattr(u, "completion_tokens_details", None)
+    details_in = getattr(u, "prompt_tokens_details", None)
+    found = {
+        "prompt_tokens": getattr(u, "prompt_tokens", 0),
+        "completion_tokens": getattr(u, "completion_tokens", 0),
+        "reasoning_tokens": getattr(details_out, "reasoning_tokens", 0),
+        "cached_tokens": getattr(details_in, "cached_tokens", 0),
+        "total_tokens": getattr(u, "total_tokens", 0),
+    }
+    for key, value in found.items():
+        _usage.counts[key] += value or 0
 
 VALID_ACTIONS = {"sql", "clarify", "cannot_answer"}
 PREVIEW_ROWS = 50  # rows sent to the explainer; more costs tokens without adding much
@@ -139,6 +182,7 @@ def ask_for_sql(system: str, messages: list[dict]) -> tuple[str, dict]:
         response_format={"type": "json_object"},
         temperature=0,  # same question -> same SQL, which makes testing reproducible
     )
+    _count_usage(resp)
     raw = resp.choices[0].message.content or ""
 
     try:
@@ -209,6 +253,7 @@ def explain(
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
     )
+    _count_usage(resp)
     return (resp.choices[0].message.content or "").strip()
 
 

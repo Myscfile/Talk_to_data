@@ -5,9 +5,9 @@ returns are compared with the known answer. Behaviour questions (refusals)
 only check the status. If enough questions pass, the model is recorded in
 eval/validated_model.json.
 
-Each question is also timed: the total, the time spent waiting for the model and
-the time spent running SQL. A summary of those goes into the results file and
-validated_model.json.
+Each question is also timed (the total, the time spent waiting for the model and
+the time spent running SQL) and its model tokens are counted. A summary of those
+goes into the results file and validated_model.json.
 
 Usage (from the project folder):
     python eval/run_eval.py                     full run; may update validated_model.json
@@ -35,6 +35,7 @@ from compare import results_match  # noqa: E402
 from config import Config  # noqa: E402
 from db import connect_readonly, describe_schema, run_query  # noqa: E402
 from llm import build_system_prompt, prompt_hash  # noqa: E402
+from logger import TOKEN_FIELDS  # noqa: E402
 
 QUESTIONS_PATH = Config.EVAL_DIR / "questions.json"
 RESULTS_DIR = Config.EVAL_DIR / "results"
@@ -61,7 +62,8 @@ def check_question(
         result = app.answer(conn, system, q["question"])
     except Exception as e:  # network/API problems count as a failure, not a crash
         timing = {"seconds": round(time.perf_counter() - started, 2),
-                  "llm_seconds": None, "llm_calls": None, "query_seconds": None}
+                  "llm_seconds": None, "llm_calls": None, "query_seconds": None,
+                  **dict.fromkeys(TOKEN_FIELDS)}
         return False, f"exception: {e}", "", timing
     calls = result.llm_calls
     if not with_explanation and result.status == "ok":
@@ -71,6 +73,7 @@ def check_question(
         "llm_seconds": result.llm_seconds,
         "llm_calls": calls,
         "query_seconds": result.query_seconds,
+        **{field: getattr(result, field) for field in TOKEN_FIELDS},
     }
 
     if result.status not in q["expect"]:
@@ -86,6 +89,18 @@ def check_question(
     got = [list(r) for r in result.rows[:3]]
     want = [a["rows"][:3] for a in answers]
     return False, f"got {got}, expected one of {want}", result.sql, timing
+
+
+def token_summary(outcomes: list[dict]) -> dict:
+    """Token totals over the run, plus the median per question that finished."""
+    done = [o["timing"] for o in outcomes if o["timing"]["total_tokens"] is not None]
+    if not done:
+        return {"questions_counted": 0}
+    return {
+        "questions_counted": len(done),
+        **{f"sum_{field}": sum(t[field] for t in done) for field in TOKEN_FIELDS},
+        "median_total_tokens": round(statistics.median(t["total_tokens"] for t in done)),
+    }
 
 
 def timing_summary(outcomes: list[dict], with_explanation: bool) -> dict:
@@ -178,6 +193,7 @@ def main() -> int:
         "prompt_hash": prompt_hash(),
         "eval_set_hash": hashlib.sha256(raw).hexdigest()[:12],
         "timing": timing_summary(outcomes, args.with_explanation),
+        "tokens": token_summary(outcomes),
     }
 
     RESULTS_DIR.mkdir(exist_ok=True)
@@ -195,6 +211,14 @@ def main() -> int:
             f"{t['slowest_seconds']} s ({t['slowest_question']}). Model: median "
             f"{t['median_llm_seconds']} s, {t['llm_share']:.0%} of the total time, "
             f"{t['total_llm_calls']} calls. Query: median {t['median_query_seconds']} s."
+        )
+    k = record["tokens"]
+    if k["questions_counted"]:
+        print(
+            f"Tokens ({scope}): {k['sum_total_tokens']:,} in total, median "
+            f"{k['median_total_tokens']:,} per question. Prompt {k['sum_prompt_tokens']:,} "
+            f"(cached {k['sum_cached_tokens']:,}), completion {k['sum_completion_tokens']:,} "
+            f"(reasoning {k['sum_reasoning_tokens']:,})."
         )
     meets_bar = pass_rate >= Config.EVAL_PASS_RATE
     if full_run and meets_bar:

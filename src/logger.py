@@ -19,6 +19,11 @@ from config import Config
 
 RUN_ID = uuid.uuid4().hex[:8]
 
+# Token counts stored with every question (llm.py counts them per model call).
+TOKEN_FIELDS = (
+    "prompt_tokens", "completion_tokens", "reasoning_tokens", "cached_tokens", "total_tokens"
+)
+
 # Set by setup_logging(); the file itself is created on the first record.
 _json_file = None
 
@@ -62,6 +67,7 @@ def log_interaction(
     query_seconds: float = 0.0,
     llm_seconds: float = 0.0,
     llm_calls: int = 0,
+    tokens: dict | None = None,
 ) -> None:
     """Append one question/answer record (one JSON line) to this run's file.
 
@@ -71,7 +77,9 @@ def log_interaction(
     question_id). session_id tells dashboard visitors apart within one run.
     seconds is the whole answer. Of that, query_seconds is the time spent running
     SQL and llm_seconds the time spent waiting for the model, both summed over
-    attempts; llm_calls counts the model calls.
+    attempts; llm_calls counts the model calls. tokens holds the TOKEN_FIELDS
+    counts over all model calls (reasoning is part of completion, cached part
+    of prompt).
     """
     record = {
         "question_id": question_id,
@@ -91,6 +99,7 @@ def log_interaction(
         "query_seconds": query_seconds,
         "llm_seconds": llm_seconds,
         "llm_calls": llm_calls,
+        **{field: (tokens or {}).get(field, 0) for field in TOKEN_FIELDS},
     }
     with open(_json_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")

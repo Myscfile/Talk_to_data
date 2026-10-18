@@ -23,8 +23,15 @@ from db import (
     is_read_only,
     run_query,
 )
-from llm import ask_for_sql, build_system_prompt, explain, prompt_hash
-from logger import log_interaction, setup_logging
+from llm import (
+    ask_for_sql,
+    build_system_prompt,
+    explain,
+    prompt_hash,
+    reset_usage,
+    usage,
+)
+from logger import TOKEN_FIELDS, log_interaction, setup_logging
 from suggestions import clean_questions, split_followups
 
 log = logging.getLogger(__name__)
@@ -44,6 +51,12 @@ class Result:
     query_seconds: float = 0.0  # time spent running SQL, over all attempts
     llm_seconds: float = 0.0  # time spent waiting for the model, over all calls
     llm_calls: int = 0  # number of model calls (SQL attempts plus the explanation)
+    # Tokens over all model calls; reasoning is part of completion, cached part of prompt.
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    reasoning_tokens: int = 0
+    cached_tokens: int = 0
+    total_tokens: int = 0
 
 
 def _examples() -> list[str]:
@@ -85,9 +98,12 @@ def answer(
     query_seconds = 0.0  # summed over attempts, so a slow failed query still counts
     llm_seconds, llm_calls = 0.0, 0  # the same for time spent waiting on the model
 
+    reset_usage()  # count this question's tokens from zero
+
     def timings() -> dict:
-        """The time counters, for whichever Result this question ends with."""
+        """Time and token counters, for whichever Result this question ends with."""
         return {
+            **usage(),
             "query_seconds": round(query_seconds, 3),
             "llm_seconds": round(llm_seconds, 3),
             "llm_calls": llm_calls,
@@ -95,15 +111,17 @@ def answer(
 
     for attempt in range(Config.MAX_FIX_ATTEMPTS + 1):
         llm_started = time.perf_counter()
+        tokens_before = usage()["total_tokens"]
         raw, decision = ask_for_sql(system, messages)
         took = time.perf_counter() - llm_started
+        tokens = usage()["total_tokens"] - tokens_before
         llm_seconds, llm_calls = llm_seconds + took, llm_calls + 1
         action = decision["action"]
         msg = decision.get("message", "")
         sql = decision.get("sql", "")
         log.info(
-            "[%s] attempt %d: action=%s (model %.2f s) sql=%s",
-            question_id, attempt + 1, action, took, sql,
+            "[%s] attempt %d: action=%s (model %.2f s, %d tokens) sql=%s",
+            question_id, attempt + 1, action, took, tokens, sql,
         )
 
         if action != "sql":
@@ -156,10 +174,14 @@ def answer(
         log.info("[%s] query ran in %.3f s, %d rows", question_id, took, len(rows))
 
         llm_started = time.perf_counter()
+        tokens_before = usage()["total_tokens"]
         explained = explain(question, sql, msg, cols, rows, truncated)
         took = time.perf_counter() - llm_started
+        tokens = usage()["total_tokens"] - tokens_before
         llm_seconds, llm_calls = llm_seconds + took, llm_calls + 1
-        log.info("[%s] explanation written (model %.2f s)", question_id, took)
+        log.info(
+            "[%s] explanation written (model %.2f s, %d tokens)", question_id, took, tokens
+        )
         explanation, follow_ups = split_followups(explained, _data_years(conn))
         return Result(
             "ok",
@@ -273,6 +295,7 @@ def main() -> None:
             query_seconds=result.query_seconds,
             llm_seconds=result.llm_seconds,
             llm_calls=result.llm_calls,
+            tokens={field: getattr(result, field) for field in TOKEN_FIELDS},
         )
 
     conn.close()
