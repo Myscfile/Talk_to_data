@@ -12,12 +12,9 @@ File names are <date>_<time>_<run_id>, so each run gets its own pair.
 
 import json
 import logging
-import uuid
 from datetime import datetime
 
 from config import Config
-
-RUN_ID = uuid.uuid4().hex[:8]
 
 # Token counts stored with every question (llm.py counts them per model call).
 TOKEN_FIELDS = (
@@ -33,7 +30,7 @@ def setup_logging() -> None:
     global _json_file
     Config.LOG_DIR.mkdir(exist_ok=True)
     Config.JSON_LOG_DIR.mkdir(exist_ok=True)
-    stamp = f"{datetime.now():%Y-%m-%d_%H-%M-%S}_{RUN_ID}"
+    stamp = f"{datetime.now():%Y-%m-%d_%H-%M-%S}_{Config.RUN_ID}"
     _json_file = Config.JSON_LOG_DIR / f"{stamp}.jsonl"
 
     file_handler = logging.FileHandler(Config.LOG_DIR / f"{stamp}.log", encoding="utf-8")
@@ -83,7 +80,7 @@ def log_interaction(
     """
     record = {
         "question_id": question_id,
-        "run_id": RUN_ID,
+        "run_id": Config.RUN_ID,
         "session_id": session_id,
         "ts": datetime.now().isoformat(timespec="seconds"),
         "source": source,

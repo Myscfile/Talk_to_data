@@ -4,11 +4,15 @@ All tunable values live here so they can be changed in one place.
 Secrets (API keys) are NOT stored here; they come from the .env file.
 """
 
+import uuid
 from pathlib import Path
 
 
 class Config:
     """App-wide settings, used as Config.NAME (no instance needed)."""
+
+    # Identifies this program run in the logs. Generated once, when the module loads.
+    RUN_ID = uuid.uuid4().hex[:8]
 
     # Paths are built from this file's location, so they work no matter
     # which folder the app is started from. parent.parent = project root.
@@ -23,7 +27,7 @@ class Config:
 
     # LLM settings
     MODEL = "gpt-oss-120b"  # Cerebras model name
-    MAX_FIX_ATTEMPTS = 2  # times the model may retry after a failed/rejected query
+    MAX_FIX_ATTEMPTS = 3  # times the model may retry after a failed/rejected query
 
     # Questions known to work: shown as buttons, and offered when a question fails
     EXAMPLE_QUESTIONS = (
