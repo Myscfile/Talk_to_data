@@ -348,7 +348,9 @@ def show_chat(stats: dict) -> None:
     pending = st.session_state.pop("pending", None)
     if pending:
         question, source, follow_up_of = (
-            pending["question"], pending["source"], pending["follow_up_of"]
+            pending["question"],
+            pending["source"],
+            pending["follow_up_of"],
         )
     else:
         question, source, follow_up_of = typed, "typed", ""
@@ -479,7 +481,7 @@ def keep_page_at_top() -> None:
 
 keep_page_at_top()  # first, so it is in place before the page can scroll
 start_logging()
-st.title("Querybara, chat with your data")
+st.title("Talk with your data: meet Capi")
 try:
     stats = load_stats()
 except FileNotFoundError as e:

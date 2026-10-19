@@ -1,10 +1,30 @@
 {
   "model": "gpt-oss-120b",
-  "validated_at": "2026-10-17T12:44:03",
+  "validated_at": "2026-10-18T18:09:35",
   "passed": 10,
   "total": 10,
   "pass_rate": 1.0,
   "failed_ids": [],
-  "prompt_hash": "96eac5a22cf5",
-  "eval_set_hash": "c5710ad92ebf"
+  "prompt_hash": "42fad4d7c728",
+  "eval_set_hash": "c5710ad92ebf",
+  "timing": {
+    "explanation_included": false,
+    "questions_timed": 10,
+    "median_seconds": 0.45,
+    "slowest_seconds": 1.56,
+    "slowest_question": "q03",
+    "median_llm_seconds": 0.4,
+    "median_query_seconds": 0.034,
+    "llm_share": 0.72,
+    "total_llm_calls": 10
+  },
+  "tokens": {
+    "questions_counted": 10,
+    "sum_prompt_tokens": 16233,
+    "sum_completion_tokens": 2630,
+    "sum_reasoning_tokens": 1750,
+    "sum_cached_tokens": 10752,
+    "sum_total_tokens": 18863,
+    "median_total_tokens": 1834
+  }
 }
