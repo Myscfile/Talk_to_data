@@ -14,13 +14,6 @@ logs/
 json_log/
 eval/results/
 
-# Database & data (too large for git; rebuild from the Kaggle CSVs)
-*.db
-*.db-journal
-*.db-wal
-*.sqlite
-data/
-
 # Editor / OS junk
 .vscode/
 .idea/
